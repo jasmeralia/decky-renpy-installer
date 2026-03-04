@@ -12,6 +12,32 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { FaDownload } from "react-icons/fa";
 import { call } from "@decky/api";
 
+// --- Error Boundary (debug: catches render errors so they don't crash Decky) ---
+
+type ErrorBoundaryState = { hasError: boolean; error: string };
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: "" };
+  }
+
+  static getDerivedStateFromError(e: unknown): ErrorBoundaryState {
+    return { hasError: true, error: String(e) };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return React.createElement(
+        "div",
+        { style: { fontSize: 11, color: "#e67e6a", padding: 8, whiteSpace: "pre-wrap" } },
+        "Plugin render error:\n" + this.state.error,
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // --- Logger ---
 
 type LogLevel = "debug" | "info" | "warn" | "error";
@@ -641,7 +667,15 @@ export default definePlugin((_serverAPI) => {
 
   return {
     title: <div className="Title">Renpy Installer</div>,
-    content: <Content />,
-    icon: <FaDownload />,
+    content: (
+      <ErrorBoundary>
+        <Content />
+      </ErrorBoundary>
+    ),
+    icon: (
+      <ErrorBoundary>
+        <FaDownload />
+      </ErrorBoundary>
+    ),
   };
 });
