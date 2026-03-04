@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.7] - 2026-03-03
+
+### Fixed
+- `deploy.sh`: use `--rsync-path="sudo -n rsync"` for both rsync steps so files deploy as root, avoiding permission failures caused by Decky resetting plugin directory ownership on service restart
+
 ## [0.0.6] - 2026-03-03
 
 ### Changed

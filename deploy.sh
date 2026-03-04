@@ -41,7 +41,7 @@ pnpm run build
 echo "✅ Build complete"
 
 echo "🚀 Deploying to ${DECK}..."
-rsync -av plugin.json main.py "${DECK}:/home/deck/homebrew/plugins/${PLUGIN}/"
-rsync -av --delete ./dist/ "${DECK}:/home/deck/homebrew/plugins/${PLUGIN}/dist/"
+rsync -av --rsync-path="sudo -n rsync" plugin.json main.py "${DECK}:/home/deck/homebrew/plugins/${PLUGIN}/"
+rsync -av --rsync-path="sudo -n rsync" --delete ./dist/ "${DECK}:/home/deck/homebrew/plugins/${PLUGIN}/dist/"
 ssh "${DECK}" "sudo -n systemctl restart plugin_loader"
 echo "✅ Deploy complete"
