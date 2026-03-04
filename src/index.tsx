@@ -1,4 +1,4 @@
-import { call, definePlugin } from "@decky/api";
+import { call, definePlugin, FileSelectionType, openFilePicker } from "@decky/api";
 import {
   PanelSection,
   PanelSectionRow,
@@ -366,6 +366,38 @@ export default definePlugin((_serverAPI) => {
       }
     };
 
+    const handleBrowseUsb = async () => {
+      log("info", "Opening file picker for USB folder");
+      try {
+        const res = await openFilePicker(
+          FileSelectionType.FOLDER,
+          usbPath.trim() || "/run/media/",
+          false,
+          true,
+        );
+        log("info", "USB folder selected:", res.realpath);
+        setUsbPath(res.realpath);
+      } catch (e) {
+        log("warn", "USB folder picker cancelled or failed:", e);
+      }
+    };
+
+    const handleBrowseSd = async () => {
+      log("info", "Opening file picker for SD card destination");
+      try {
+        const res = await openFilePicker(
+          FileSelectionType.FOLDER,
+          destRoot.trim() || "/run/media/",
+          false,
+          true,
+        );
+        log("info", "SD card folder selected:", res.realpath);
+        setDestRoot(res.realpath);
+      } catch (e) {
+        log("warn", "SD card folder picker cancelled or failed:", e);
+      }
+    };
+
     const handleLogLevelChange = async (option: SingleDropdownOption) => {
       const level = option.data as LogLevel;
       log("info", "Changing log level to:", level);
@@ -598,6 +630,16 @@ export default definePlugin((_serverAPI) => {
         <PanelSectionRow>
           <ButtonItem
             layout="below"
+            onClick={handleBrowseUsb}
+            disabled={settingsBusy}
+          >
+            Browse for USB folder…
+          </ButtonItem>
+        </PanelSectionRow>
+
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
             onClick={refreshZipFiles}
             disabled={settingsBusy || !usbPath.trim()}
           >
@@ -627,6 +669,16 @@ export default definePlugin((_serverAPI) => {
             onChange={(e) => setDestRoot(e.target.value)}
             disabled={settingsBusy}
           />
+        </PanelSectionRow>
+
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={handleBrowseSd}
+            disabled={settingsBusy}
+          >
+            Browse for SD card folder…
+          </ButtonItem>
         </PanelSectionRow>
 
         <PanelSectionRow>

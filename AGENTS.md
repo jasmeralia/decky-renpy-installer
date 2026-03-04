@@ -95,6 +95,10 @@ Frontend uses SteamClient directly (no backend wrapper needed) for:
 - SteamClient.Apps.SpecifyCompatTool(appId, "proton_experimental") — set Proton for .exe
 - SteamClient.User.StartRestart(false) — restart Steam on Finish (no NavigateBack; panel closes with Steam restart)
 
+Frontend also uses `openFilePicker(FileSelectionType.FOLDER, ...)` from `@decky/api` for:
+- "Browse for USB folder…" button — lets user override auto-detected USB mount path
+- "Browse for SD card folder…" button — lets user override auto-detected SD card path
+
 ## Change workflow (required on every change)
 
 On every change, without exception unless explicitly instructed otherwise:

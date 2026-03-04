@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.20] - 2026-03-04
+
+### Added
+- "Browse for USB folder…" button opens Decky's folder picker (`openFilePicker`) starting
+  at the current USB path (or `/run/media/` if unset), so the user can correct the path
+  when auto-detection picks the wrong mount point.
+- "Browse for SD card folder…" button similarly lets the user pick the games destination
+  folder via the native file picker instead of typing it manually.
+
+### Fixed
+- `list_usb_mounts()` (backend) now filters by device type: USB storage uses `/dev/sd*`
+  while the SD card uses `/dev/mmcblk*`. Both mount under `/run/media/` on Steam Deck,
+  so previously the SD card appeared in the USB mount list, causing both paths to show
+  the same value.
+
+## [0.0.19] - 2026-03-04
+
+### Fixed
+- `list_usb_mounts()` was returning the SD card as a USB mount. Both USB drives
+  and the SD card mount under `/run/media/deck/` on Steam Deck; they are now
+  distinguished by device type: USB storage uses `/dev/sd*` while the SD card
+  uses `/dev/mmcblk*`. Only `/dev/sd*` entries are returned, so the USB path
+  and SD card destination path no longer show the same value.
+
 ## [0.0.18] - 2026-03-04
 
 ### Fixed

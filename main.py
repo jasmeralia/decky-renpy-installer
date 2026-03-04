@@ -50,14 +50,20 @@ def _ensure_dir(path: Path) -> None:
 
 
 def _list_mount_points() -> List[str]:
+    """Return mount points for USB storage devices only.
+
+    On Steam Deck, both USB drives and the SD card mount under /run/media/deck/.
+    We distinguish them by device: USB storage uses /dev/sd* while the SD card
+    uses /dev/mmcblk*.  Only /dev/sd* entries are returned here.
+    """
     mounts: List[str] = []
     try:
         with open("/proc/mounts", "r", encoding="utf-8") as f:
             for line in f:
                 parts = line.split()
                 if len(parts) >= 2:
-                    mnt = parts[1]
-                    if mnt.startswith("/run/media/deck/"):
+                    device, mnt = parts[0], parts[1]
+                    if device.startswith("/dev/sd") and mnt.startswith("/run/media/"):
                         mounts.append(mnt)
         logger.debug("USB mount scan found %d mount(s): %s", len(mounts), mounts)
     except Exception as e:
