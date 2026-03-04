@@ -18,6 +18,13 @@ Repo layout:
 - main.py: backend methods exposed to frontend
 - plugin.json/package.json: metadata
 - dist/index.js: build output (generated, not committed)
+- eslint.config.mjs: ESLint 9 flat config (typescript-eslint v8)
+
+Code quality rules:
+- All ESLint warnings are treated as errors (@typescript-eslint/no-explicit-any: error)
+- No `any` types — use `unknown`, specific interfaces, or typed generics
+- `react-icons/*` is a Decky runtime dep — do NOT add it to package.json; it is declared external in rollup.config.mjs
+- Deprecation warnings must be resolved; if a dep is deprecated, upgrade it or add a pnpm override
 
 Current backend methods:
 - list_usb_mounts()
@@ -31,7 +38,7 @@ Current backend methods:
 
 On every change, without exception unless explicitly instructed otherwise:
 
-1. Run lint: `npm run lint` — fix all errors before continuing.
+1. Run lint: `pnpm run lint` — fix all errors before continuing. Warnings are treated as errors; the lint script must exit clean with zero output.
 2. Run tests if any are configured (check package.json scripts).
 3. Bump the **patch** version only in both `package.json` and `plugin.json`
    (e.g. 0.0.1 → 0.0.2). Never bump major/minor unless the user asks.

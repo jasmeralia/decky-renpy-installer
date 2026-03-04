@@ -16,6 +16,7 @@ export default {
     "@decky/ui",
     "decky-frontend-lib",
     "@decky/api",
+    /^react-icons\//,
   ],
   plugins: [
     replace({

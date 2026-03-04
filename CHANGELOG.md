@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.6] - 2026-03-03
+
+### Changed
+- Migrate ESLint 8 → ESLint 9 flat config (`eslint.config.mjs`); replace `@typescript-eslint/eslint-plugin` + `@typescript-eslint/parser` with `typescript-eslint` v8 + `globals`; removes all deprecated subdependencies (`@humanwhocodes/*`, `glob@7`, `inflight`, `rimraf`)
+- Remove stale `minimatch`/`ajv` pnpm overrides (no longer needed with ESLint 9)
+- Lint script updated: `eslint . --ext .ts,.tsx` → `eslint .` (ESLint 9 flat config handles file matching)
+- Add `react-icons/*` as rollup external (suppresses unresolved-dependency warning; it is a Decky runtime dep)
+- Update `AGENTS.md`: deprecation warnings must be resolved; document ESLint 9 flat config and `react-icons` external rule
+
 ## [0.0.5] - 2026-03-03
 
 ### Fixed
