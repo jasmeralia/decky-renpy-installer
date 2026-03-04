@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.3] - 2026-03-03
+
+### Fixed
+- `deploy.sh`: restore `pnpm audit` step (using `pnpm` instead of `npm`); default audit level is `low`; `$1` overrides audit level, `$2` overrides deploy target host
+
 ## [0.0.2] - 2026-03-03
 
 ### Fixed
