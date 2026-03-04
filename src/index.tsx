@@ -196,6 +196,20 @@ function basename(p: string): string {
   return p.replace(/\\/g, "/").split("/").pop() ?? p;
 }
 
+function formatEta(pct: number, startMs: number): string {
+  if (pct <= 0) return "Calculating…";
+  const elapsed = Date.now() - startMs;
+  if (elapsed < 1500) return "Calculating…";
+  const totalEst = elapsed / (pct / 100);
+  const remainingMs = Math.max(0, totalEst - elapsed);
+  if (remainingMs < 5000) return "< 5s remaining";
+  const secs = Math.round(remainingMs / 1000);
+  if (secs < 60) return `~${secs}s remaining`;
+  const mins = Math.floor(secs / 60);
+  const s = secs % 60;
+  return s > 0 ? `~${mins}m ${s}s remaining` : `~${mins}m remaining`;
+}
+
 // --- Plugin ---
 
 export default definePlugin((_serverAPI) => {
@@ -217,6 +231,7 @@ export default definePlugin((_serverAPI) => {
     const [logLevel, setLogLevel] = useState<LogLevel>("error");
 
     const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+    const operationStartTime = useRef<number | null>(null);
 
     const stopPolling = useCallback(() => {
       if (pollInterval.current !== null) {
@@ -462,6 +477,7 @@ export default definePlugin((_serverAPI) => {
       setUsbSafeMsg(false);
       try {
         // Step 2: Copy ZIP from USB to SD card
+        operationStartTime.current = Date.now();
         setStep("copying");
         setProgress(0);
         log("info", "Starting copy: %s → %s", usbZipPath, destRoot);
@@ -473,6 +489,7 @@ export default definePlugin((_serverAPI) => {
 
         // Show "USB safe to remove" message and proceed to extraction
         setUsbSafeMsg(true);
+        operationStartTime.current = Date.now();
         setStep("extracting");
         setProgress(0);
         log("info", "Starting extract: %s → %s", destZip, destRoot);
@@ -543,6 +560,13 @@ export default definePlugin((_serverAPI) => {
                 step === "copying" ? "Copying to SD card…" : "Extracting…"
               }
             />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              {operationStartTime.current !== null
+                ? formatEta(progress, operationStartTime.current)
+                : ""}
+            </div>
           </PanelSectionRow>
         </PanelSection>
       );

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.22] - 2026-03-04
+
+### Added
+- ETA display during copy and extract operations. Shows "Calculating…" for the
+  first 1.5 seconds, then a linear estimate ("~2m 30s remaining", "< 5s remaining",
+  etc.) that updates every 500ms alongside the progress bar.
+
 ## [0.0.21] - 2026-03-04
 
 ### Fixed
