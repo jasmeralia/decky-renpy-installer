@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.12] - 2026-03-04
+
+### Changed
+- Renamed plugin title from "Ren'Py Installer" to "Renpy Installer" to avoid HTML
+  apostrophe escaping issues in Decky's plugin list UI
+
 ## [0.0.11] - 2026-03-04
 
 ### Fixed

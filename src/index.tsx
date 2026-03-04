@@ -472,7 +472,7 @@ export default definePlugin((_serverAPI) => {
 
     if (step === "copying" || step === "extracting") {
       return (
-        <PanelSection title="Ren'Py ZIP Installer">
+        <PanelSection title="Renpy ZIP Installer">
           {usbSafeMsg && (
             <PanelSectionRow>
               <div style={{ fontSize: 12, color: "#8dba6a" }}>
@@ -513,7 +513,7 @@ export default definePlugin((_serverAPI) => {
 
     if (step === "complete") {
       return (
-        <PanelSection title="Ren'Py ZIP Installer">
+        <PanelSection title="Renpy ZIP Installer">
           <PanelSectionRow>
             <div style={{ fontSize: 12, color: "#8dba6a" }}>
               "{completedGameName}" added to Steam. Click Finish to restart Steam
@@ -536,7 +536,7 @@ export default definePlugin((_serverAPI) => {
 
     if (step === "error") {
       return (
-        <PanelSection title="Ren'Py ZIP Installer">
+        <PanelSection title="Renpy ZIP Installer">
           <PanelSectionRow>
             <div style={{ fontSize: 12, color: "#e67e6a", whiteSpace: "pre-wrap" }}>
               {errorMsg}
@@ -558,7 +558,7 @@ export default definePlugin((_serverAPI) => {
     }));
 
     return (
-      <PanelSection title="Ren'Py ZIP Installer">
+      <PanelSection title="Renpy ZIP Installer">
         <PanelSectionRow>
           <div style={{ fontSize: 12, opacity: 0.8 }}>
             USB mounts:{" "}
@@ -640,7 +640,7 @@ export default definePlugin((_serverAPI) => {
   };
 
   return {
-    title: <div className="Title">Ren'Py Installer</div>,
+    title: <div className="Title">Renpy Installer</div>,
     content: <Content />,
     icon: <FaDownload />,
   };
