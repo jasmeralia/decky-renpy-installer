@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.21] - 2026-03-04
+
+### Fixed
+- `FileSelectionType` is a `const enum` in `@decky/api` — TypeScript inlines it at compile
+  time but esbuild does not, so it had no runtime presence in the dist and caused a rollup
+  build error. Replaced the import with a local `const FileSelectionType = { FILE: 0, FOLDER: 1 }`.
+- Added `pnpm run build` as step 2 of the change workflow in `AGENTS.md` so build failures
+  are caught before tags are pushed.
+
 ## [0.0.20] - 2026-03-04
 
 ### Added

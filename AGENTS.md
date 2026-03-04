@@ -104,16 +104,17 @@ Frontend also uses `openFilePicker(FileSelectionType.FOLDER, ...)` from `@decky/
 On every change, without exception unless explicitly instructed otherwise:
 
 1. Run lint: `pnpm run lint` — fix all errors before continuing. Warnings are treated as errors; the lint script must exit clean with zero output.
-2. Run tests if any are configured (check package.json scripts).
-3. Bump the **patch** version only in both `package.json` and `plugin.json`
+2. Run build: `pnpm run build` — must succeed with no errors before continuing.
+3. Run tests if any are configured (check package.json scripts).
+4. Bump the **patch** version only in both `package.json` and `plugin.json`
    (e.g. 0.0.1 → 0.0.2). Never bump major/minor unless the user asks.
-4. Update `CHANGELOG.md` with a new `## [version] - YYYY-MM-DD` section
+5. Update `CHANGELOG.md` with a new `## [version] - YYYY-MM-DD` section
    describing what changed.
-5. Update this file (`AGENTS.md`) if there are critical context changes
+6. Update this file (`AGENTS.md`) if there are critical context changes
    (new backend methods, major architectural shifts, new constraints).
-6. Commit all changes: `git add -A && git commit -m "..."`
-7. Push to master: `git push origin master`
-8. Create and push a version tag: `git tag v<version> && git push origin v<version>`
+7. Commit all changes: `git add -A && git commit -m "..."`
+8. Push to master: `git push origin master`
+9. Create and push a version tag: `git tag v<version> && git push origin v<version>`
 
 Pushing the tag triggers the GitHub Actions release workflow, which builds
 the plugin zip and creates a draft GitHub release automatically.

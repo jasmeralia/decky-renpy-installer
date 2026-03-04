@@ -1,4 +1,8 @@
-import { call, definePlugin, FileSelectionType, openFilePicker } from "@decky/api";
+import { call, definePlugin, openFilePicker } from "@decky/api";
+
+// FileSelectionType is a const enum in @decky/api — erased by tsc but not by esbuild,
+// so it has no runtime presence in the dist. Use the numeric values directly.
+const FileSelectionType = { FILE: 0, FOLDER: 1 } as const;
 import {
   PanelSection,
   PanelSectionRow,
