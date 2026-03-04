@@ -2,7 +2,13 @@
 set -e
 
 AUDIT_LEVEL="${1:-low}"
-DECK="${2:-deck@orion.local}"
+RAW_DECK="${2:-deck@orion.local}"
+# Prepend default user 'deck' if no user@ prefix was given
+if [[ "${RAW_DECK}" != *@* ]]; then
+    DECK="deck@${RAW_DECK}"
+else
+    DECK="${RAW_DECK}"
+fi
 PLUGIN="decky-renpy-installer"
 
 VALID_LEVELS="low moderate high critical"
@@ -37,5 +43,5 @@ echo "✅ Build complete"
 echo "🚀 Deploying to ${DECK}..."
 rsync -av plugin.json main.py "${DECK}:/home/deck/homebrew/plugins/${PLUGIN}/"
 rsync -av --delete ./dist/ "${DECK}:/home/deck/homebrew/plugins/${PLUGIN}/dist/"
-ssh "${DECK}" "sudo systemctl restart plugin_loader"
+ssh "${DECK}" "sudo -n systemctl restart plugin_loader"
 echo "✅ Deploy complete"

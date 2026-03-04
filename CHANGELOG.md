@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.5] - 2026-03-03
+
+### Fixed
+- `deploy.sh`: auto-prepend `deck@` when no `user@` prefix given for host arg; use `sudo -n` for non-interactive systemctl restart; remove the transient `sudo mkdir` step (directory is a one-time manual setup)
+
 ## [0.0.4] - 2026-03-03
 
 ### Security
