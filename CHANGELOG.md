@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.18] - 2026-03-04
+
+### Fixed
+- **Root cause of React error #31 crash**: Decky selects ESMODULE_V1 loading (uses
+  `import()` + calls `.default()`) when `package.json` has `"type": "module"`. Our CJS
+  bundle's `module.exports = index` is a `ReferenceError` in ESM scope. Fixed by switching
+  rollup output format from `"cjs"` to `"es"`, producing a proper `export default` bundle
+  that ESMODULE_V1 can load correctly.
+- **All backend calls silently failing**: Missing `api_version` in `plugin.json` caused
+  Decky's `sandboxed_plugin.py` to default to version 0 and throw
+  `"api_version 1 or newer is required to call methods with index-based arguments"` on every
+  `@decky/api` `call()`. Added `"api_version": 1` to `plugin.json`.
+- **Argument marshalling**: All backend `call()` wrappers were passing a single dict object
+  where Python expected positional string arguments (e.g. `call("start_copy", {zip_path, dest_root})`
+  instead of `call("start_copy", zip_path, dest_root)`). Fixed all wrappers to pass positional args.
+- **Wrong Plugin interface**: Returned `title: JSX.Element` (old `decky-frontend-lib` field,
+  silently ignored by Decky) instead of the correct shape. Removed `title`; Decky sets the
+  plugin name from `plugin.json` automatically.
+- **Mixed SDK generations**: Replaced `decky-frontend-lib` import for `definePlugin` with the
+  correct `@decky/api` import, eliminating the bundled webpack module-scan code from DFL.
+  `Navigation.NavigateBack()` (which required DFL) removed; Steam restart on Finish is
+  sufficient.
+
 ## [0.0.15] - 2026-03-04
 
 ### Fixed

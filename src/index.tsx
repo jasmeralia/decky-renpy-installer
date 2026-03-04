@@ -1,4 +1,4 @@
-import { definePlugin, Navigation } from "decky-frontend-lib";
+import { call, definePlugin } from "@decky/api";
 import {
   PanelSection,
   PanelSectionRow,
@@ -10,7 +10,6 @@ import {
 } from "@decky/ui";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { FaDownload } from "react-icons/fa";
-import { call } from "@decky/api";
 
 // --- Error Boundary (debug: catches render errors so they don't crash Decky) ---
 
@@ -109,15 +108,15 @@ async function detectSdMount(): Promise<string | null> {
 }
 
 async function listZipFiles(mount_path: string): Promise<string[]> {
-  return call<[{ mount_path: string }], string[]>("list_zip_files", { mount_path });
+  return call<[string], string[]>("list_zip_files", mount_path);
 }
 
 async function startCopy(zip_path: string, dest_root: string): Promise<void> {
-  await call<[{ zip_path: string; dest_root: string }]>("start_copy", { zip_path, dest_root });
+  await call<[string, string]>("start_copy", zip_path, dest_root);
 }
 
 async function startExtract(zip_path: string, dest_root: string): Promise<void> {
-  await call<[{ zip_path: string; dest_root: string }]>("start_extract", { zip_path, dest_root });
+  await call<[string, string]>("start_extract", zip_path, dest_root);
 }
 
 async function getProgress(): Promise<ProgressResult> {
@@ -125,11 +124,11 @@ async function getProgress(): Promise<ProgressResult> {
 }
 
 async function getLaunchers(game_dir: string): Promise<LaunchersResult> {
-  return call<[{ game_dir: string }], LaunchersResult>("get_launchers", { game_dir });
+  return call<[string], LaunchersResult>("get_launchers", game_dir);
 }
 
 async function ensureExecutable(launcher_path: string): Promise<void> {
-  await call<[{ launcher_path: string }]>("ensure_executable", { launcher_path });
+  await call<[string]>("ensure_executable", launcher_path);
 }
 
 async function loadSettings(): Promise<Record<string, unknown>> {
@@ -137,12 +136,12 @@ async function loadSettings(): Promise<Record<string, unknown>> {
 }
 
 async function saveSetting(key: string, value: unknown): Promise<void> {
-  await call<[{ key: string; value: unknown }]>("settings_set", { key, value });
+  await call<[string, unknown]>("settings_set", key, value);
   await call<[]>("settings_commit");
 }
 
 async function backendSetLogLevel(level: string): Promise<boolean> {
-  return call<[{ level: string }], boolean>("set_log_level", { level });
+  return call<[string], boolean>("set_log_level", level);
 }
 
 // --- Steam client helpers ---
@@ -484,14 +483,9 @@ export default definePlugin((_serverAPI) => {
     };
 
     const handleFinish = () => {
-      log("info", "User clicked Finish, restarting Steam and closing panel");
-      // Restart Steam so the new shortcut appears in the library, then close the panel.
+      log("info", "User clicked Finish, restarting Steam");
+      // Restart Steam so the new shortcut appears in the library.
       restartSteam();
-      try {
-        Navigation.NavigateBack();
-      } catch (e) {
-        log("warn", "NavigateBack failed (non-fatal):", e);
-      }
     };
 
     // ---- RENDER ----
@@ -666,16 +660,11 @@ export default definePlugin((_serverAPI) => {
   };
 
   return {
-    title: <div className="Title">Renpy Installer</div>,
     content: (
       <ErrorBoundary>
         <Content />
       </ErrorBoundary>
     ),
-    icon: (
-      <ErrorBoundary>
-        <FaDownload />
-      </ErrorBoundary>
-    ),
+    icon: <FaDownload />,
   };
 });

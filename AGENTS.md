@@ -74,7 +74,7 @@ Code quality rules:
 - No `any` types — use `unknown`, specific interfaces, or typed generics
 - `react-icons` is in devDependencies and is bundled into the output (NOT external)
 - Only `react`, `react-dom`, and `@decky/ui` are external; they are replaced with Decky's runtime globals (`SP_REACT`, `SP_JSX`/`SP_REACTDOM`, `DFL`) via `rollup-plugin-external-globals`
-- `@decky/api` and `decky-frontend-lib` are bundled (not external)
+- `@decky/api` and `react-icons` are bundled (not external); `decky-frontend-lib` has been removed
 - Deprecation warnings must be resolved; if a dep is deprecated, upgrade it or add a pnpm override
 
 Current backend methods:
@@ -93,8 +93,7 @@ Current backend methods:
 Frontend uses SteamClient directly (no backend wrapper needed) for:
 - SteamClient.Apps.AddShortcut(name, exe, startDir, args) → Promise<appId>
 - SteamClient.Apps.SpecifyCompatTool(appId, "proton_experimental") — set Proton for .exe
-- SteamClient.User.StartRestart(false) — restart Steam on Finish
-- Navigation.NavigateBack() (decky-frontend-lib) — close panel on Finish
+- SteamClient.User.StartRestart(false) — restart Steam on Finish (no NavigateBack; panel closes with Steam restart)
 
 ## Change workflow (required on every change)
 

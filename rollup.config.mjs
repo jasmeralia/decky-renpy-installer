@@ -11,13 +11,12 @@ export default {
   input: "src/index.tsx",
   output: {
     file: "dist/index.js",
-    format: "cjs",
+    format: "es",
     sourcemap: true,
-    exports: "default",
   },
   // DO NOT add an `external` array — externalGlobals handles externalization
   // and import-to-global replacement in one step. Having both conflicts and
-  // leaves `import` statements in the output.
+  // leaves dangling import statements in the output.
   plugins: [
     replace({
       preventAssignment: true,
@@ -33,13 +32,13 @@ export default {
       loaders: { ".tsx": "tsx" },
     }),
     // Must come AFTER all transformer plugins (commonjs, esbuild).
-    // Replaces import statements for Decky-provided globals with direct window
-    // variable references, eliminating all `import` statements from the output.
-    // Decky's plugin loader evaluates the bundle without a native ES module
-    // context, so any `import` statement is a SyntaxError.
+    // Decky uses ESMODULE_V1 loading (import()) when package.json has
+    // "type": "module", so the bundle must be ESM (export default).
+    // externalGlobals replaces Decky-provided module imports with direct
+    // references to the globals Decky exposes on the window.
     //
     // @decky/manifest is a virtual module consumed by @decky/api; we inline
-    // the manifest JSON directly so it doesn't remain as an import statement.
+    // the manifest JSON directly so it resolves at build time.
     externalGlobals({
       react: "SP_REACT",
       "react-dom": "SP_REACTDOM",
