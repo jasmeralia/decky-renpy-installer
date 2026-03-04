@@ -42,7 +42,6 @@ export default {
     // the manifest JSON directly so it doesn't remain as an import statement.
     externalGlobals({
       react: "SP_REACT",
-      "react/jsx-runtime": "SP_JSX",
       "react-dom": "SP_REACTDOM",
       "@decky/ui": "DFL",
       "@decky/manifest": `(${JSON.stringify(manifest)})`,
