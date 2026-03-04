@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.9] - 2026-03-04
+
+### Added
+- Comprehensive backend logging (debug/info/warn/error) throughout all operations in `main.py`
+- Configurable log level setting stored in plugin settings, applied at backend startup; defaults to `error`
+- New backend methods: `get_log_level()` and `set_log_level(level)` for runtime log level control
+- Log level dropdown in the browse screen UI (DEBUG / INFO / WARN / ERROR); changes apply to both frontend and backend immediately
+- Frontend console logging (`console.debug/info/warn/error`) throughout all state transitions, API calls, and Steam client interactions, gated by the same log level
+
 ## [0.0.8] - 2026-03-04
 
 ### Changed

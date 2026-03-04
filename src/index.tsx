@@ -5,10 +5,35 @@ import {
   ButtonItem,
   TextField,
   ProgressBarWithInfo,
+  DropdownItem,
+  SingleDropdownOption,
 } from "@decky/ui";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { FaDownload } from "react-icons/fa";
 import { call } from "@decky/api";
+
+// --- Logger ---
+
+type LogLevel = "debug" | "info" | "warn" | "error";
+
+const LOG_LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
+
+let _logLevel: LogLevel = "error";
+
+const LOG_LEVEL_RANK: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+
+function log(level: LogLevel, ...args: unknown[]): void {
+  if (LOG_LEVEL_RANK[level] < LOG_LEVEL_RANK[_logLevel]) return;
+  const prefix = `[renpy-installer][${level.toUpperCase()}]`;
+  switch (level) {
+    case "debug": console.debug(prefix, ...args); break;
+    case "info":  console.info(prefix, ...args);  break;
+    case "warn":  console.warn(prefix, ...args);  break;
+    case "error": console.error(prefix, ...args); break;
+  }
+}
+
+// --- Types ---
 
 type SteamClientAPI = {
   Apps?: {
@@ -90,6 +115,10 @@ async function saveSetting(key: string, value: unknown): Promise<void> {
   await call<[]>("settings_commit");
 }
 
+async function backendSetLogLevel(level: string): Promise<boolean> {
+  return call<[{ level: string }], boolean>("set_log_level", { level });
+}
+
 // --- Steam client helpers ---
 
 async function addShortcut(
@@ -101,11 +130,15 @@ async function addShortcut(
   try {
     const sc = (window as Window & { SteamClient?: SteamClientAPI }).SteamClient;
     if (!sc?.Apps?.AddShortcut) {
+      log("error", "SteamClient.Apps.AddShortcut not available");
       return { ok: false, error: "SteamClient.Apps.AddShortcut not available" };
     }
+    log("info", "Adding Steam shortcut:", name, exe, startDir, args);
     const appId = await sc.Apps.AddShortcut(name, exe, startDir, args);
+    log("info", "Steam shortcut added, appId:", appId);
     return { ok: true, appId };
   } catch (e) {
+    log("error", "addShortcut failed:", e);
     return { ok: false, error: e };
   }
 }
@@ -114,8 +147,9 @@ function specifyCompatTool(appId: number, toolName: string): void {
   try {
     const sc = (window as Window & { SteamClient?: SteamClientAPI }).SteamClient;
     sc?.Apps?.SpecifyCompatTool?.(appId, toolName);
-  } catch {
-    // Non-fatal; compat tool setting is best-effort
+    log("info", "Set compat tool for appId", appId, "→", toolName);
+  } catch (e) {
+    log("warn", "specifyCompatTool failed (non-fatal):", e);
   }
 }
 
@@ -123,8 +157,9 @@ function restartSteam(): void {
   try {
     const sc = (window as Window & { SteamClient?: SteamClientAPI }).SteamClient;
     sc?.User?.StartRestart?.(false);
-  } catch {
-    // Ignore; user can restart manually
+    log("info", "Steam restart requested");
+  } catch (e) {
+    log("warn", "restartSteam failed (non-fatal):", e);
   }
 }
 
@@ -150,11 +185,13 @@ export default definePlugin((_serverAPI) => {
     const [zipFiles, setZipFiles] = useState<string[]>([]);
     const [settingsBusy, setSettingsBusy] = useState(false);
     const [settingsStatus, setSettingsStatus] = useState("");
+    const [logLevel, setLogLevel] = useState<LogLevel>("error");
 
     const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const stopPolling = useCallback(() => {
       if (pollInterval.current !== null) {
+        log("debug", "Stopping progress poll interval");
         clearInterval(pollInterval.current);
         pollInterval.current = null;
       }
@@ -165,15 +202,23 @@ export default definePlugin((_serverAPI) => {
       (onUpdate: (pct: number) => void): Promise<ProgressResult> =>
         new Promise((resolve) => {
           stopPolling();
+          log("debug", "Starting progress poll interval (500ms)");
           pollInterval.current = setInterval(async () => {
             try {
               const p = await getProgress();
+              log("debug", "Progress poll:", p.operation, p.percent + "%", p.done ? "(done)" : "");
               onUpdate(p.percent);
               if (p.done) {
                 stopPolling();
+                if (p.error) {
+                  log("error", "Backend operation failed:", p.error);
+                } else {
+                  log("info", "Backend operation completed:", p.operation, "result:", p.result);
+                }
                 resolve(p);
               }
             } catch (e) {
+              log("error", "getProgress poll threw:", e);
               stopPolling();
               resolve({
                 operation: "",
@@ -194,33 +239,58 @@ export default definePlugin((_serverAPI) => {
     // Load settings and detect mounts on mount
     useEffect(() => {
       (async () => {
+        log("debug", "Loading settings and detecting mounts...");
         let hasSdSetting = false;
         try {
           const s = await loadSettings();
+          log("debug", "Loaded settings:", s);
+
+          // Apply saved log level
+          if (typeof s?.log_level === "string" && s.log_level.length > 0) {
+            const savedLevel = s.log_level as LogLevel;
+            if (LOG_LEVELS.includes(savedLevel)) {
+              _logLevel = savedLevel;
+              setLogLevel(savedLevel);
+              log("info", "Log level restored from settings:", savedLevel);
+            }
+          }
+
           if (typeof s?.sd_card_path === "string" && s.sd_card_path.length > 0) {
             setDestRoot(s.sd_card_path);
             hasSdSetting = true;
+            log("debug", "Loaded sd_card_path from settings:", s.sd_card_path);
           } else if (
             typeof s?.default_dest_root === "string" &&
             s.default_dest_root.length > 0
           ) {
             setDestRoot(s.default_dest_root);
+            log("debug", "Loaded default_dest_root from settings:", s.default_dest_root);
           }
-        } catch {}
+        } catch (e) {
+          log("warn", "Failed to load settings:", e);
+        }
         if (!hasSdSetting) {
           try {
+            log("debug", "No SD path in settings, auto-detecting...");
             const detected = await detectSdMount();
             if (detected) {
+              log("info", "Auto-detected SD card mount:", detected);
               setDestRoot(detected);
               await saveSetting("sd_card_path", detected);
+            } else {
+              log("warn", "SD card auto-detection returned null");
             }
-          } catch {}
+          } catch (e) {
+            log("warn", "detectSdMount failed:", e);
+          }
         }
         try {
           const mounts = await listUsbMounts();
+          log("info", "USB mounts found:", mounts);
           setUsbMounts(mounts);
           if (mounts.length > 0) setUsbPath(mounts[0]);
-        } catch {
+        } catch (e) {
+          log("warn", "listUsbMounts failed:", e);
           setUsbMounts([]);
         }
       })();
@@ -230,16 +300,20 @@ export default definePlugin((_serverAPI) => {
 
     const refreshZipFiles = async () => {
       if (!usbPath.trim()) {
+        log("warn", "refreshZipFiles called with empty usbPath");
         setSettingsStatus("No USB mount path set.");
         return;
       }
+      log("info", "Scanning USB for ZIP files:", usbPath);
       setSettingsBusy(true);
       setSettingsStatus("Scanning USB for ZIP files…");
       try {
         const files = await listZipFiles(usbPath);
+        log("info", "Found ZIP files:", files);
         setZipFiles(files);
         setSettingsStatus(`Found ${files.length} ZIP file(s).`);
       } catch (e) {
+        log("error", "listZipFiles failed:", e);
         setZipFiles([]);
         setSettingsStatus(`Error: ${String(e)}`);
       } finally {
@@ -249,17 +323,34 @@ export default definePlugin((_serverAPI) => {
 
     const handleSaveSdPath = async () => {
       if (!destRoot.trim()) {
+        log("warn", "handleSaveSdPath called with empty destRoot");
         setSettingsStatus("SD card path is not set.");
         return;
       }
+      log("info", "Saving SD card path:", destRoot);
       setSettingsBusy(true);
       try {
         await saveSetting("sd_card_path", destRoot);
+        log("info", "SD card path saved");
         setSettingsStatus("SD card path saved.");
       } catch (e) {
+        log("error", "saveSetting(sd_card_path) failed:", e);
         setSettingsStatus(`Error: ${String(e)}`);
       } finally {
         setSettingsBusy(false);
+      }
+    };
+
+    const handleLogLevelChange = async (option: SingleDropdownOption) => {
+      const level = option.data as LogLevel;
+      log("info", "Changing log level to:", level);
+      _logLevel = level;
+      setLogLevel(level);
+      try {
+        await backendSetLogLevel(level);
+        log("info", "Backend log level updated to:", level);
+      } catch (e) {
+        log("warn", "backendSetLogLevel failed (frontend level still updated):", e);
       }
     };
 
@@ -273,22 +364,27 @@ export default definePlugin((_serverAPI) => {
       const gameName = basename(gameDir);
       const exe = lType === "sh" ? "/bin/bash" : launcherPath;
       const args = lType === "sh" ? `"${launcherPath}"` : "";
+      log("info", "finishInstall: gameName=%s exe=%s startDir=%s args=%s type=%s", gameName, exe, gameDir, args, lType);
       const addResult = await addShortcut(gameName, exe, gameDir, args);
       if (!addResult.ok) {
         throw new Error(`Could not add Steam shortcut: ${String(addResult.error)}`);
       }
       if (lType === "exe" && addResult.appId !== undefined) {
+        log("info", "Launcher is .exe — setting Proton Experimental for appId:", addResult.appId);
         specifyCompatTool(addResult.appId, "proton_experimental");
       }
       setCompletedGameName(gameName);
       setStep("complete");
+      log("info", "Installation complete for:", gameName);
     };
 
     const handleLauncherPick = async (launcherPath: string) => {
+      log("info", "User picked launcher:", launcherPath);
       try {
         await ensureExecutable(launcherPath);
         await finishInstall(pendingGameDir, launcherPath, launcherType);
       } catch (e) {
+        log("error", "handleLauncherPick failed:", e);
         setErrorMsg(String(e));
         setStep("error");
       }
@@ -296,51 +392,63 @@ export default definePlugin((_serverAPI) => {
 
     const handleZipSelect = async (usbZipPath: string) => {
       if (!destRoot.trim()) {
+        log("error", "handleZipSelect: destRoot is empty");
         setErrorMsg("SD card destination path is not set.");
         setStep("error");
         return;
       }
+      log("info", "handleZipSelect: zip=%s dest=%s", usbZipPath, destRoot);
       setUsbSafeMsg(false);
       try {
         // Step 2: Copy ZIP from USB to SD card
         setStep("copying");
         setProgress(0);
+        log("info", "Starting copy: %s → %s", usbZipPath, destRoot);
         await startCopy(usbZipPath, destRoot);
         const copyResult = await waitForProgress((pct) => setProgress(pct));
         if (copyResult.error) throw new Error(copyResult.error);
         const destZip = copyResult.result!.dest_zip;
+        log("info", "Copy finished, destZip:", destZip);
 
         // Show "USB safe to remove" message and proceed to extraction
         setUsbSafeMsg(true);
         setStep("extracting");
         setProgress(0);
+        log("info", "Starting extract: %s → %s", destZip, destRoot);
         await startExtract(destZip, destRoot);
         const extractResult = await waitForProgress((pct) => setProgress(pct));
         if (extractResult.error) throw new Error(extractResult.error);
         const gameDir = extractResult.result!.game_dir;
+        log("info", "Extract finished, gameDir:", gameDir);
 
         // Step 5: Find launchers
+        log("info", "Getting launchers for:", gameDir);
         const lr = await getLaunchers(gameDir);
+        log("info", "getLaunchers result:", lr);
         if (!lr.launchers.length || !lr.type) {
           throw new Error("No .sh or .exe launcher found in the game folder.");
         }
         if (lr.launchers.length === 1) {
+          log("info", "Single launcher found, using:", lr.launchers[0]);
           await ensureExecutable(lr.launchers[0]);
           await finishInstall(gameDir, lr.launchers[0], lr.type);
         } else {
           // Multiple launchers — let the user choose
+          log("info", "Multiple launchers found (%d), presenting selection", lr.launchers.length);
           setPendingGameDir(gameDir);
           setLaunchers(lr.launchers);
           setLauncherType(lr.type);
           setStep("launcher_pick");
         }
       } catch (e) {
+        log("error", "handleZipSelect flow failed:", e);
         setErrorMsg(String(e));
         setStep("error");
       }
     };
 
     const handleInstallAnother = () => {
+      log("info", "User clicked 'Install another game', resetting to browse");
       setStep("browse");
       setProgress(0);
       setUsbSafeMsg(false);
@@ -350,12 +458,13 @@ export default definePlugin((_serverAPI) => {
     };
 
     const handleFinish = () => {
+      log("info", "User clicked Finish, restarting Steam and closing panel");
       // Restart Steam so the new shortcut appears in the library, then close the panel.
       restartSteam();
       try {
         Navigation.NavigateBack();
-      } catch {
-        // NavigateBack may not always succeed; fail silently
+      } catch (e) {
+        log("warn", "NavigateBack failed (non-fatal):", e);
       }
     };
 
@@ -443,6 +552,11 @@ export default definePlugin((_serverAPI) => {
     }
 
     // Browse step
+    const logLevelOptions: SingleDropdownOption[] = LOG_LEVELS.map((l) => ({
+      data: l,
+      label: l.toUpperCase(),
+    }));
+
     return (
       <PanelSection title="Ren'Py ZIP Installer">
         <PanelSectionRow>
@@ -503,6 +617,17 @@ export default definePlugin((_serverAPI) => {
           >
             Save SD card path
           </ButtonItem>
+        </PanelSectionRow>
+
+        <PanelSectionRow>
+          <DropdownItem
+            label="Log level"
+            description="Backend and frontend logging verbosity."
+            rgOptions={logLevelOptions}
+            selectedOption={logLevel}
+            onChange={handleLogLevelChange}
+            disabled={settingsBusy}
+          />
         </PanelSectionRow>
 
         {settingsStatus ? (

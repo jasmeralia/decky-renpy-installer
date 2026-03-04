@@ -84,6 +84,8 @@ Current backend methods:
 - get_progress() — polls current op: {operation, percent, done, error, result}
 - get_launchers(game_dir) — returns {launchers: [...paths], type: "sh"|"exe"|null}
 - ensure_executable(launcher_path) — chmod +x
+- get_log_level() — returns current log level string ("debug"|"info"|"warn"|"error")
+- set_log_level(level) — sets log level in settings, applies immediately, returns bool
 - settings_read/settings_set/settings_commit
 
 Frontend uses SteamClient directly (no backend wrapper needed) for:
