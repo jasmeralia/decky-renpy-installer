@@ -16,7 +16,7 @@ module.exports = {
     es2022: true,
   },
   rules: {
-    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/no-explicit-any": "error",
     "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     "no-unreachable": "error",
     "no-empty": ["error", { "allowEmptyCatch": true }],

@@ -4,6 +4,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { FaDownload } from "react-icons/fa";
 import { call } from "@decky/api";
 
+type SteamClientAPI = {
+  Apps?: {
+    AddShortcut?: (name: string, exe: string, startDir: string, args: string) => number;
+  };
+};
+
 type InstallRequest = {
   zip_path: string;
   dest_root: string;
@@ -37,18 +43,18 @@ async function copyZipToSd(zip_path: string, dest_root: string): Promise<{ dest_
   return await call<{ dest_zip: string }>("copy_zip_to_sd", { zip_path, dest_root });
 }
 
-async function loadSettings(): Promise<Record<string, any>> {
-  return await call<Record<string, any>>("settings_read", {});
+async function loadSettings(): Promise<Record<string, unknown>> {
+  return await call<Record<string, unknown>>("settings_read", {});
 }
 
-async function saveSetting(key: string, value: any): Promise<void> {
+async function saveSetting(key: string, value: unknown): Promise<void> {
   await call("settings_set", { key, value });
   await call("settings_commit", {});
 }
 
-function tryAddShortcut(name: string, exe: string, startDir: string, args: string): { ok: boolean; appId?: number; error?: any } {
+function tryAddShortcut(name: string, exe: string, startDir: string, args: string): { ok: boolean; appId?: number; error?: unknown } {
   try {
-    const sc: any = (window as any).SteamClient;
+    const sc = (window as Window & { SteamClient?: SteamClientAPI }).SteamClient;
     if (!sc?.Apps?.AddShortcut) {
       return { ok: false, error: "SteamClient.Apps.AddShortcut not available." };
     }
