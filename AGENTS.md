@@ -1,17 +1,66 @@
 You are assisting with a Decky Loader plugin (Steam Deck, Gaming Mode) named "Ren'Py Installer".
 
 Goal:
-- User plugs in USB stick containing a Ren'Py game ZIP.
-- Plugin UI lets user input/select ZIP path and destination root (default setting).
-- Backend copies ZIP to destination, extracts, deletes copied ZIP.
-- Backend finds the single Ren'Py launcher .sh (error if none or >1) and ensures executable.
-- Frontend adds a Steam Non-Steam shortcut using SteamClient APIs (prefer SteamClient.Apps.AddShortcut).
-- We do NOT implement eject initially; we instead show 'safe to remove' message.
+Provide a UI flow to install a game ZIP from a USB drive to the SD card and register it as a Steam non-Steam shortcut.
+
+Action flow (in order):
+
+1. **Select ZIP** — User picks a ZIP file from the USB drive via the plugin UI.
+
+2. **Copy to SD card** — Backend copies the ZIP to the SD card root set in plugin options.
+   Show a progress bar during copy.
+   On completion, show a message: "USB drive can be safely removed unless you have more
+   games to install." No buttons yet; installation continues automatically.
+
+3. **Inspect ZIP structure** — Examine the ZIP on the SD card to determine if all contents
+   live under a single top-level subfolder.
+
+   **Case A — ZIP has a single top-level subfolder:**
+   - Check whether that subfolder name already exists at the destination root.
+   - If it does → surface an error (do not crash Decky) and stop.
+   - If it does not → extract the ZIP into the destination root (subfolder is created
+     by extraction), then cd into that new subfolder.
+
+   **Case B — ZIP contents are flat (no single top-level subfolder):**
+   - Derive the target folder name as the ZIP filename minus the `.zip` extension.
+   - Check whether a folder with that name already exists at the destination root.
+   - If it does → surface an error (do not crash Decky) and stop.
+   - If it does not → create the folder, then extract the ZIP into the destination root
+     so contents land inside the new folder (extract with dest = destination root,
+     folder already present), then cd into that folder.
+
+   Show a progress bar during extraction.
+
+4. **Delete ZIP** — After successful extraction in either case, delete the ZIP file from
+   the SD card.
+
+5. **Find launcher** — Inside the new game folder:
+   - Look for files ending in `.sh`.
+     - If exactly one is found, ensure it is executable and use it.
+     - If more than one is found, present the user with a selection list and use whichever
+       they pick (make it executable). This is an edge case and not expected in practice.
+   - If no `.sh` found, look for files ending in `.exe`; apply the same single/multiple logic.
+   - If neither extension yields any files → surface an error (do not crash Decky) and stop.
+
+6. **Add to Steam** — Add the found launcher as a non-Steam shortcut using
+   `SteamClient.Apps.AddShortcut` (preferred).
+   - For `.exe` launchers, also set the Steam compatibility tool to **Proton Experimental**
+     (a future plugin setting may allow choosing a different default Proton version).
+   - Do NOT edit `shortcuts.vdf` directly while Steam is running.
+
+7. **Restart Steam if necessary** — Restart Steam so the new non-Steam game appears in the
+   library. Only restart if required to make the shortcut visible.
+
+8. **Completion UI** — Once the game has been successfully added to Steam, show two buttons:
+   - **"Install another game"** — resets the UI back to the ZIP selection step.
+   - **"Finish"** — closes the Decky panel.
 
 Constraints:
 - Must work in Gaming Mode.
 - Avoid editing shortcuts.vdf directly while Steam is running.
 - Keep permissions minimal; do not require root unless absolutely necessary.
+- Do NOT write to any binary files without explicit user permission.
+- The USB device is **read-only** from the plugin's perspective — never write, delete, or modify anything on it.
 
 Repo layout:
 - src/index.tsx: UI + calls backend via @decky/api call()
@@ -30,9 +79,18 @@ Current backend methods:
 - list_usb_mounts()
 - detect_sd_mount()
 - list_zip_files(mount_path)
-- copy_zip_to_sd(zip_path, dest_root)
+- start_copy(zip_path, dest_root) — starts async chunked copy; returns immediately
+- start_extract(zip_path, dest_root) — starts async extraction with Case A/B logic; deletes ZIP on success; returns immediately
+- get_progress() — polls current op: {operation, percent, done, error, result}
+- get_launchers(game_dir) — returns {launchers: [...paths], type: "sh"|"exe"|null}
+- ensure_executable(launcher_path) — chmod +x
 - settings_read/settings_set/settings_commit
-- install_from_zip(zip_path, dest_root, overwrite, dest_folder_name?)
+
+Frontend uses SteamClient directly (no backend wrapper needed) for:
+- SteamClient.Apps.AddShortcut(name, exe, startDir, args) → Promise<appId>
+- SteamClient.Apps.SpecifyCompatTool(appId, "proton_experimental") — set Proton for .exe
+- SteamClient.User.StartRestart(false) — restart Steam on Finish
+- Navigation.NavigateBack() (decky-frontend-lib) — close panel on Finish
 
 ## Change workflow (required on every change)
 

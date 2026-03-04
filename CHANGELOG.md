@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.8] - 2026-03-04
+
+### Changed
+- Full install flow implemented end-to-end; install button is no longer disabled
+- Backend: replaced `copy_zip_to_sd` / `install_from_zip` with async task-based `start_copy` / `start_extract` that stream progress via `get_progress()`; extraction now correctly handles Case A (ZIP with single top-level subfolder) and Case B (flat ZIP, folder created from zip name); ZIP deleted from SD after successful extraction
+- Backend: `_find_launcher_sh` replaced by `get_launchers` which returns all `.sh` candidates and falls back to `.exe` if none found; `ensure_executable` handles chmod separately
+- Frontend: state-machine UI (browse → copying → extracting → [launcher_pick] → complete / error); progress bars shown during copy and extract via `ProgressBarWithInfo`
+- Frontend: "USB safe to remove" message shown after copy completes and persists during extraction
+- Frontend: multiple-launcher edge case shows a selection list instead of erroring
+- Frontend: `.exe` launchers automatically get Proton Experimental set via `SteamClient.Apps.SpecifyCompatTool`
+- Frontend: completion screen shows "Install another game" and "Finish" buttons; Finish restarts Steam and closes the panel
+- Frontend: overwrite toggle removed; destination folder collision always surfaces as an error
+- Frontend: `call()` type signatures corrected to match `@decky/api` generic convention `<Args, Return>`
+- Added `src/react-icons.d.ts` type shim so `typecheck` passes (react-icons is a Decky runtime dep not in package.json)
+
 ## [0.0.7] - 2026-03-03
 
 ### Fixed
