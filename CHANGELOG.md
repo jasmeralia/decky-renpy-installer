@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.25] - 2026-03-04
+
+### Added
+- ZIP filename displayed above the progress bar during copy and extract so
+  it is clear which game is being installed when queuing multiple installs.
+
 ## [0.0.24] - 2026-03-04
 
 ### Added

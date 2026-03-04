@@ -238,6 +238,7 @@ export default definePlugin((_serverAPI) => {
     const [settingsStatus, setSettingsStatus] = useState("");
     const [logLevel, setLogLevel] = useState<LogLevel>("error");
 
+    const [currentZipName, setCurrentZipName] = useState("");
     const [speedBytesPerSec, setSpeedBytesPerSec] = useState(0);
     const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const operationStartTime = useRef<number | null>(null);
@@ -497,6 +498,7 @@ export default definePlugin((_serverAPI) => {
         return;
       }
       log("info", "handleZipSelect: zip=%s dest=%s", usbZipPath, destRoot);
+      setCurrentZipName(basename(usbZipPath));
       setUsbSafeMsg(false);
       try {
         // Step 2: Copy ZIP from USB to SD card
@@ -576,6 +578,13 @@ export default definePlugin((_serverAPI) => {
               </div>
             </PanelSectionRow>
           )}
+          {currentZipName ? (
+            <PanelSectionRow>
+              <div style={{ fontSize: 12, opacity: 0.9, fontWeight: "bold" }}>
+                {currentZipName}
+              </div>
+            </PanelSectionRow>
+          ) : null}
           <PanelSectionRow>
             <ProgressBarWithInfo
               nProgress={progress}
