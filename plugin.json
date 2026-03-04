@@ -1,7 +1,7 @@
 {
   "name": "Ren'Py Installer",
   "author": "Morgan Blackthorne, Winds of Storm",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Install Ren'Py games from a ZIP on USB to SD/internal storage and add them to Steam as a Non-Steam shortcut.",
   "main": "main.py",
   "target": "dist/index.js",

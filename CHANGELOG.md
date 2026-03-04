@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.4] - 2026-03-03
+
+### Security
+- Add `pnpm.overrides` to force patched transitive deps: `minimatch` >= 3.1.4 (GHSA-23c5-xmqv-rm74), `minimatch` >= 9.0.7 (GHSA-3ppc-4f35-3m26), `ajv` >= 6.14.0 (GHSA-2g4f-4pwh-qvx6), `rollup` >= 4.59.0 (GHSA-mw96-cpmx-2vgc)
+- Bump direct `rollup` devDependency to `^4.59.0`
+
 ## [0.0.3] - 2026-03-03
 
 ### Fixed
