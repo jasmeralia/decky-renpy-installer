@@ -21,6 +21,17 @@ except Exception:
 
 _LOG_LEVELS = {"debug": logging.DEBUG, "info": logging.INFO, "warn": logging.WARNING, "warning": logging.WARNING, "error": logging.ERROR}
 
+# Module-level state — avoids self.method() binding issues with Decky Loader's
+# plugin proxy, which can call _main with the class rather than an instance.
+_progress: Dict[str, Any] = {
+    "operation": "",
+    "percent": 0,
+    "done": True,
+    "error": None,
+    "result": None,
+}
+_active_task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
+
 
 def _apply_log_level(level_str: str) -> None:
     level = _LOG_LEVELS.get(level_str.lower(), logging.ERROR)
@@ -112,19 +123,116 @@ def _get_zip_top_folder(zip_path: Path) -> Optional[str]:
     return None
 
 
-class Plugin:
-    def _init_state(self) -> None:
-        if not hasattr(self, "_progress"):
-            self._progress: Dict[str, Any] = {
-                "operation": "",
-                "percent": 0,
-                "done": True,
-                "error": None,
-                "result": None,
-            }
-        if not hasattr(self, "_active_task"):
-            self._active_task: Optional[asyncio.Task] = None  # type: ignore[assignment]
+def _copy_sync(zip_path: str, dest_root: str) -> str:
+    global _progress
+    src = Path(zip_path).expanduser()
+    if not src.exists() or not src.is_file():
+        logger.error("ZIP not found for copy: %s", src)
+        raise RuntimeError(f"ZIP not found: {src}")
+    dest_root_p = Path(dest_root).expanduser()
+    _ensure_dir(dest_root_p)
+    dst = dest_root_p / src.name
+    total = src.stat().st_size
+    logger.info("Copying '%s' → '%s' (%.1f MB)", src.name, dst, total / (1024 * 1024))
+    copied = 0
+    CHUNK = 1024 * 1024  # 1 MB
+    with src.open("rb") as fsrc, dst.open("wb") as fdst:
+        while True:
+            chunk = fsrc.read(CHUNK)
+            if not chunk:
+                break
+            fdst.write(chunk)
+            copied += len(chunk)
+            pct = int(copied / total * 100) if total > 0 else 0
+            _progress["percent"] = pct
+            logger.debug("Copy progress: %d%% (%d / %d bytes)", pct, copied, total)
+    shutil.copystat(src, dst)
+    logger.info("Copy complete: '%s'", dst)
+    return str(dst)
 
+
+async def _do_copy(zip_path: str, dest_root: str) -> None:
+    global _progress
+    try:
+        dest_zip = await asyncio.to_thread(_copy_sync, zip_path, dest_root)
+        _progress.update({"percent": 100, "done": True, "result": {"dest_zip": dest_zip}})
+        logger.info("Copy task finished: dest_zip=%s", dest_zip)
+    except Exception as e:
+        logger.exception("Copy failed: %s", e)
+        _progress.update({"done": True, "error": str(e)})
+
+
+def _extract_sync(zip_path: str, dest_root: str) -> str:
+    global _progress
+    zip_p = Path(zip_path).expanduser()
+    dest_p = Path(dest_root).expanduser()
+    logger.info("Inspecting ZIP structure: %s", zip_p.name)
+    top_folder = _get_zip_top_folder(zip_p)
+
+    with zipfile.ZipFile(zip_p, "r") as zf:
+        members = zf.infolist()
+        total = max(len(members), 1)
+        logger.debug("ZIP has %d members", len(members))
+
+        if top_folder:
+            # Case A: all entries under a single top-level subfolder.
+            game_dir = dest_p / top_folder
+            logger.info("Case A: extracting with top folder '%s' → %s", top_folder, game_dir)
+            if game_dir.exists():
+                logger.error("Destination folder already exists: %s", game_dir)
+                raise RuntimeError(
+                    f"Folder '{top_folder}' already exists at destination: {game_dir}"
+                )
+            for i, member in enumerate(members):
+                zf.extract(member, dest_p)
+                pct = int((i + 1) / total * 100)
+                _progress["percent"] = pct
+                logger.debug("Extract progress: %d%% (member %d/%d: %s)", pct, i + 1, total, member.filename)
+        else:
+            # Case B: flat ZIP. Create a folder named after the ZIP file.
+            folder_name = _safe_folder_name(zip_p.name)
+            game_dir = dest_p / folder_name
+            logger.info("Case B: flat ZIP, creating folder '%s' → %s", folder_name, game_dir)
+            if game_dir.exists():
+                logger.error("Destination folder already exists: %s", game_dir)
+                raise RuntimeError(
+                    f"Folder '{folder_name}' already exists at destination: {game_dir}"
+                )
+            game_dir.mkdir(parents=True)
+            for i, member in enumerate(members):
+                zf.extract(member, game_dir)
+                pct = int((i + 1) / total * 100)
+                _progress["percent"] = pct
+                logger.debug("Extract progress: %d%% (member %d/%d: %s)", pct, i + 1, total, member.filename)
+
+    logger.info("Extraction complete, game_dir=%s", game_dir)
+
+    # Delete the ZIP from the SD card after successful extraction
+    try:
+        zip_p.unlink(missing_ok=True)
+        logger.info("Deleted ZIP from SD card: %s", zip_p)
+    except TypeError:
+        if zip_p.exists():
+            zip_p.unlink()
+            logger.info("Deleted ZIP from SD card (legacy unlink): %s", zip_p)
+    except Exception as e:
+        logger.warning("Failed to delete ZIP '%s': %s", zip_p, e)
+
+    return str(game_dir)
+
+
+async def _do_extract(zip_path: str, dest_root: str) -> None:
+    global _progress
+    try:
+        game_dir = await asyncio.to_thread(_extract_sync, zip_path, dest_root)
+        _progress.update({"percent": 100, "done": True, "result": {"game_dir": game_dir}})
+        logger.info("Extract task finished: game_dir=%s", game_dir)
+    except Exception as e:
+        logger.exception("Extract failed: %s", e)
+        _progress.update({"done": True, "error": str(e)})
+
+
+class Plugin:
     # --- Settings ---
 
     async def settings_read(self) -> Dict[str, Any]:
@@ -179,152 +287,45 @@ class Plugin:
     # --- Progress ---
 
     async def get_progress(self) -> Dict[str, Any]:
-        self._init_state()
-        p = dict(self._progress)
+        p = dict(_progress)
         logger.debug("get_progress: op=%s pct=%d done=%s error=%s", p.get("operation"), p.get("percent"), p.get("done"), p.get("error"))
         return p
 
     # --- Copy (USB → SD card) ---
 
     async def start_copy(self, zip_path: str, dest_root: str) -> Dict[str, Any]:
-        self._init_state()
+        global _progress, _active_task
         logger.info("start_copy: zip_path=%s dest_root=%s", zip_path, dest_root)
-        self._progress = {
+        _progress = {
             "operation": "copy",
             "percent": 0,
             "done": False,
             "error": None,
             "result": None,
         }
-        if self._active_task and not self._active_task.done():
+        if _active_task and not _active_task.done():
             logger.warning("Cancelling in-flight task before starting new copy")
-            self._active_task.cancel()
-        self._active_task = asyncio.create_task(self._do_copy(zip_path, dest_root))
+            _active_task.cancel()
+        _active_task = asyncio.create_task(_do_copy(zip_path, dest_root))
         return {"started": True}
-
-    def _copy_sync(self, zip_path: str, dest_root: str) -> str:
-        src = Path(zip_path).expanduser()
-        if not src.exists() or not src.is_file():
-            logger.error("ZIP not found for copy: %s", src)
-            raise RuntimeError(f"ZIP not found: {src}")
-        dest_root_p = Path(dest_root).expanduser()
-        _ensure_dir(dest_root_p)
-        dst = dest_root_p / src.name
-        total = src.stat().st_size
-        logger.info("Copying '%s' → '%s' (%.1f MB)", src.name, dst, total / (1024 * 1024))
-        copied = 0
-        CHUNK = 1024 * 1024  # 1 MB
-        with src.open("rb") as fsrc, dst.open("wb") as fdst:
-            while True:
-                chunk = fsrc.read(CHUNK)
-                if not chunk:
-                    break
-                fdst.write(chunk)
-                copied += len(chunk)
-                pct = int(copied / total * 100) if total > 0 else 0
-                self._progress["percent"] = pct
-                logger.debug("Copy progress: %d%% (%d / %d bytes)", pct, copied, total)
-        shutil.copystat(src, dst)
-        logger.info("Copy complete: '%s'", dst)
-        return str(dst)
-
-    async def _do_copy(self, zip_path: str, dest_root: str) -> None:
-        try:
-            dest_zip = await asyncio.to_thread(self._copy_sync, zip_path, dest_root)
-            self._progress.update(
-                {"percent": 100, "done": True, "result": {"dest_zip": dest_zip}}
-            )
-            logger.info("Copy task finished: dest_zip=%s", dest_zip)
-        except Exception as e:
-            logger.exception("Copy failed: %s", e)
-            self._progress.update({"done": True, "error": str(e)})
 
     # --- Extract (SD card ZIP → game folder) ---
 
     async def start_extract(self, zip_path: str, dest_root: str) -> Dict[str, Any]:
-        self._init_state()
+        global _progress, _active_task
         logger.info("start_extract: zip_path=%s dest_root=%s", zip_path, dest_root)
-        self._progress = {
+        _progress = {
             "operation": "extract",
             "percent": 0,
             "done": False,
             "error": None,
             "result": None,
         }
-        if self._active_task and not self._active_task.done():
+        if _active_task and not _active_task.done():
             logger.warning("Cancelling in-flight task before starting new extract")
-            self._active_task.cancel()
-        self._active_task = asyncio.create_task(self._do_extract(zip_path, dest_root))
+            _active_task.cancel()
+        _active_task = asyncio.create_task(_do_extract(zip_path, dest_root))
         return {"started": True}
-
-    def _extract_sync(self, zip_path: str, dest_root: str) -> str:
-        zip_p = Path(zip_path).expanduser()
-        dest_p = Path(dest_root).expanduser()
-        logger.info("Inspecting ZIP structure: %s", zip_p.name)
-        top_folder = _get_zip_top_folder(zip_p)
-
-        with zipfile.ZipFile(zip_p, "r") as zf:
-            members = zf.infolist()
-            total = max(len(members), 1)
-            logger.debug("ZIP has %d members", len(members))
-
-            if top_folder:
-                # Case A: all entries under a single top-level subfolder.
-                # Extract at dest_root; the subfolder is created by extraction.
-                game_dir = dest_p / top_folder
-                logger.info("Case A: extracting with top folder '%s' → %s", top_folder, game_dir)
-                if game_dir.exists():
-                    logger.error("Destination folder already exists: %s", game_dir)
-                    raise RuntimeError(
-                        f"Folder '{top_folder}' already exists at destination: {game_dir}"
-                    )
-                for i, member in enumerate(members):
-                    zf.extract(member, dest_p)
-                    pct = int((i + 1) / total * 100)
-                    self._progress["percent"] = pct
-                    logger.debug("Extract progress: %d%% (member %d/%d: %s)", pct, i + 1, total, member.filename)
-            else:
-                # Case B: flat ZIP. Create a folder named after the ZIP file.
-                folder_name = _safe_folder_name(zip_p.name)
-                game_dir = dest_p / folder_name
-                logger.info("Case B: flat ZIP, creating folder '%s' → %s", folder_name, game_dir)
-                if game_dir.exists():
-                    logger.error("Destination folder already exists: %s", game_dir)
-                    raise RuntimeError(
-                        f"Folder '{folder_name}' already exists at destination: {game_dir}"
-                    )
-                game_dir.mkdir(parents=True)
-                for i, member in enumerate(members):
-                    zf.extract(member, game_dir)
-                    pct = int((i + 1) / total * 100)
-                    self._progress["percent"] = pct
-                    logger.debug("Extract progress: %d%% (member %d/%d: %s)", pct, i + 1, total, member.filename)
-
-        logger.info("Extraction complete, game_dir=%s", game_dir)
-
-        # Delete the ZIP from the SD card after successful extraction
-        try:
-            zip_p.unlink(missing_ok=True)
-            logger.info("Deleted ZIP from SD card: %s", zip_p)
-        except TypeError:
-            if zip_p.exists():
-                zip_p.unlink()
-                logger.info("Deleted ZIP from SD card (legacy unlink): %s", zip_p)
-        except Exception as e:
-            logger.warning("Failed to delete ZIP '%s': %s", zip_p, e)
-
-        return str(game_dir)
-
-    async def _do_extract(self, zip_path: str, dest_root: str) -> None:
-        try:
-            game_dir = await asyncio.to_thread(self._extract_sync, zip_path, dest_root)
-            self._progress.update(
-                {"percent": 100, "done": True, "result": {"game_dir": game_dir}}
-            )
-            logger.info("Extract task finished: game_dir=%s", game_dir)
-        except Exception as e:
-            logger.exception("Extract failed: %s", e)
-            self._progress.update({"done": True, "error": str(e)})
 
     # --- Launcher discovery ---
 
@@ -356,25 +357,21 @@ class Plugin:
     # --- Lifecycle ---
 
     async def _main(self) -> None:
-        self._init_state()
         # Apply saved log level on startup
         try:
             level_str = settings.getSetting("log_level", "error")
             _apply_log_level(level_str)
-            logger.info("Ren'Py Installer backend started (log_level=%s)", level_str.upper())
+            logger.info("Renpy Installer backend started (log_level=%s)", level_str.upper())
         except Exception as e:
             logger.error("Failed to apply log level from settings: %s", e)
-            logger.info("Ren'Py Installer backend started.")
+            logger.info("Renpy Installer backend started.")
         while True:
             await asyncio.sleep(3600)
 
     async def _unload(self) -> None:
-        logger.info("Ren'Py Installer backend unloading...")
-        if (
-            hasattr(self, "_active_task")
-            and self._active_task
-            and not self._active_task.done()
-        ):
+        global _active_task
+        logger.info("Renpy Installer backend unloading...")
+        if _active_task and not _active_task.done():
             logger.warning("Cancelling in-flight task on unload")
-            self._active_task.cancel()
-        logger.info("Ren'Py Installer backend unloaded.")
+            _active_task.cancel()
+        logger.info("Renpy Installer backend unloaded.")

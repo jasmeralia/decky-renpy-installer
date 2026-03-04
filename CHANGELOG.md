@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.14] - 2026-03-04
+
+### Fixed
+- `TypeError: Plugin._init_state() missing 1 required positional argument: 'self'` —
+  Decky Loader's plugin proxy can call `_main` with the Plugin class rather than an
+  instance, so `self.method()` calls inside `_main` resolve to unbound methods.
+  Refactored: moved `_progress`, `_active_task`, and the copy/extract coroutines to
+  module level; the Plugin class methods now read/write the module-level globals directly.
+  `_init_state` is eliminated entirely.
+
 ## [0.0.13] - 2026-03-04
 
 ### Fixed
