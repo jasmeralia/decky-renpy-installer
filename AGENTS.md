@@ -72,7 +72,9 @@ Repo layout:
 Code quality rules:
 - All ESLint warnings are treated as errors (@typescript-eslint/no-explicit-any: error)
 - No `any` types — use `unknown`, specific interfaces, or typed generics
-- `react-icons/*` is a Decky runtime dep — do NOT add it to package.json; it is declared external in rollup.config.mjs
+- `react-icons` is in devDependencies and is bundled into the output (NOT external)
+- Only `react`, `react-dom`, and `@decky/ui` are external; they are replaced with Decky's runtime globals (`SP_REACT`, `SP_JSX`/`SP_REACTDOM`, `DFL`) via `rollup-plugin-external-globals`
+- `@decky/api` and `decky-frontend-lib` are bundled (not external)
 - Deprecation warnings must be resolved; if a dep is deprecated, upgrade it or add a pnpm override
 
 Current backend methods:

@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.11] - 2026-03-04
+
+### Fixed
+- `SyntaxError: cannot use import outside of a module` — Decky's plugin loader evaluates
+  the bundle without a native ES module context, so top-level `import` statements are not
+  allowed. Added `rollup-plugin-external-globals` to replace imports for `react`,
+  `react-dom`, and `@decky/ui` with direct references to Decky's runtime globals
+  (`SP_REACT`, `SP_JSX`, `SP_REACTDOM`, `DFL`), eliminating all `import` statements from
+  the output. `@decky/api`, `decky-frontend-lib`, and `react-icons` are now bundled.
+- Added `react-icons` as a devDependency (previously relied on it as an undeclared
+  transitive dep); removed the manual type shim `src/react-icons.d.ts`
+
 ## [0.0.10] - 2026-03-04
 
 ### Fixed
