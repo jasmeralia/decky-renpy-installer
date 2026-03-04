@@ -1,0 +1,89 @@
+name: Draft Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Package zip
+        run: zip -r decky-renpy-installer.zip plugin.json main.py dist/index.js package.json
+
+      - name: Get current tag
+        id: tag
+        run: echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Get last published release tag
+        id: last_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          last=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // ""')
+          echo "tag=$last" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          current="${{ steps.tag.outputs.name }}"
+          last="${{ steps.last_release.outputs.tag }}"
+          if [ -n "$last" ]; then
+            notes=$(git log "${last}..${current}" --pretty=format:"- %s" --no-merges)
+          else
+            notes=$(git log "${current}" --pretty=format:"- %s" --no-merges)
+          fi
+          {
+            echo "notes<<EOF"
+            echo "$notes"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Delete previous draft releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          current="${{ steps.tag.outputs.name }}"
+          gh release list --json isDraft,tagName \
+            --jq '.[] | select(.isDraft) | .tagName' \
+          | while read -r draft_tag; do
+              if [ "$draft_tag" != "$current" ]; then
+                gh release delete "$draft_tag" --yes --cleanup-tag 2>/dev/null || true
+              fi
+            done
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.tag.outputs.name }}" \
+            decky-renpy-installer.zip \
+            --title "${{ steps.tag.outputs.name }}" \
+            --notes "${{ steps.changelog.outputs.notes }}" \
+            --draft
