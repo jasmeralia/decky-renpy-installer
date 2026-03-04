@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.24] - 2026-03-04
+
+### Added
+- I/O speed display alongside ETA during copy and extract operations. The
+  progress line now shows e.g. `~1m 20s remaining 2022 18.4 MB/s`, computed
+  from the byte-delta between each 500 ms poll tick. The speed is omitted
+  while bytes are not yet flowing.
+- Backend `get_progress()` now returns `bytes_done` and `bytes_total` for
+  both copy (actual file bytes) and extract (sum of uncompressed member
+  sizes), enabling accurate throughput calculation on the frontend.
+
 ## [0.0.23] - 2026-03-04
 
 ### Fixed

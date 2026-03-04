@@ -90,6 +90,8 @@ type Step =
 type ProgressResult = {
   operation: string;
   percent: number;
+  bytes_done: number;
+  bytes_total: number;
   done: boolean;
   error: string | null;
   result: Record<string, string> | null;
@@ -210,6 +212,12 @@ function formatEta(pct: number, startMs: number): string {
   return s > 0 ? `~${mins}m ${s}s remaining` : `~${mins}m remaining`;
 }
 
+function formatSpeed(bytesPerSec: number): string {
+  if (bytesPerSec <= 0) return "";
+  if (bytesPerSec >= 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+  return `${(bytesPerSec / 1024).toFixed(0)} KB/s`;
+}
+
 // --- Plugin ---
 
 export default definePlugin((_serverAPI) => {
@@ -230,8 +238,11 @@ export default definePlugin((_serverAPI) => {
     const [settingsStatus, setSettingsStatus] = useState("");
     const [logLevel, setLogLevel] = useState<LogLevel>("error");
 
+    const [speedBytesPerSec, setSpeedBytesPerSec] = useState(0);
     const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const operationStartTime = useRef<number | null>(null);
+    const prevSpeedBytes = useRef(0);
+    const prevSpeedTime = useRef(0);
 
     const stopPolling = useCallback(() => {
       if (pollInterval.current !== null) {
@@ -241,17 +252,27 @@ export default definePlugin((_serverAPI) => {
       }
     }, []);
 
-    // Resolves once the backend operation completes, streaming percent updates.
+    // Resolves once the backend operation completes, streaming percent + speed updates.
     const waitForProgress = useCallback(
-      (onUpdate: (pct: number) => void): Promise<ProgressResult> =>
+      (onUpdate: (pct: number, bps: number) => void): Promise<ProgressResult> =>
         new Promise((resolve) => {
           stopPolling();
+          prevSpeedBytes.current = 0;
+          prevSpeedTime.current = Date.now();
           log("debug", "Starting progress poll interval (500ms)");
           pollInterval.current = setInterval(async () => {
             try {
               const p = await getProgress();
               log("debug", "Progress poll:", p.operation, p.percent + "%", p.done ? "(done)" : "");
-              onUpdate(p.percent);
+              const now = Date.now();
+              const dt = (now - prevSpeedTime.current) / 1000;
+              let bps = 0;
+              if (dt > 0 && p.bytes_total > 0) {
+                bps = Math.max(0, (p.bytes_done - prevSpeedBytes.current) / dt);
+                prevSpeedBytes.current = p.bytes_done;
+                prevSpeedTime.current = now;
+              }
+              onUpdate(p.percent, bps);
               if (p.done) {
                 stopPolling();
                 if (p.error) {
@@ -267,6 +288,8 @@ export default definePlugin((_serverAPI) => {
               resolve({
                 operation: "",
                 percent: 0,
+                bytes_done: 0,
+                bytes_total: 0,
                 done: true,
                 error: String(e),
                 result: null,
@@ -482,7 +505,7 @@ export default definePlugin((_serverAPI) => {
         setProgress(0);
         log("info", "Starting copy: %s → %s", usbZipPath, destRoot);
         await startCopy(usbZipPath, destRoot);
-        const copyResult = await waitForProgress((pct) => setProgress(pct));
+        const copyResult = await waitForProgress((pct, bps) => { setProgress(pct); setSpeedBytesPerSec(bps); });
         if (copyResult.error) throw new Error(copyResult.error);
         const destZip = copyResult.result!.dest_zip;
         log("info", "Copy finished, destZip:", destZip);
@@ -494,7 +517,7 @@ export default definePlugin((_serverAPI) => {
         setProgress(0);
         log("info", "Starting extract: %s → %s", destZip, destRoot);
         await startExtract(destZip, destRoot);
-        const extractResult = await waitForProgress((pct) => setProgress(pct));
+        const extractResult = await waitForProgress((pct, bps) => { setProgress(pct); setSpeedBytesPerSec(bps); });
         if (extractResult.error) throw new Error(extractResult.error);
         const gameDir = extractResult.result!.game_dir;
         log("info", "Extract finished, gameDir:", gameDir);
@@ -564,7 +587,10 @@ export default definePlugin((_serverAPI) => {
           <PanelSectionRow>
             <div style={{ fontSize: 12, opacity: 0.7 }}>
               {operationStartTime.current !== null
-                ? formatEta(progress, operationStartTime.current)
+                ? [
+                    formatEta(progress, operationStartTime.current),
+                    formatSpeed(speedBytesPerSec),
+                  ].filter(Boolean).join(" • ")
                 : ""}
             </div>
           </PanelSectionRow>

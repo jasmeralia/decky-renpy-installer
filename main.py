@@ -26,6 +26,8 @@ _LOG_LEVELS = {"debug": logging.DEBUG, "info": logging.INFO, "warn": logging.WAR
 _progress: Dict[str, Any] = {
     "operation": "",
     "percent": 0,
+    "bytes_done": 0,
+    "bytes_total": 0,
     "done": True,
     "error": None,
     "result": None,
@@ -142,6 +144,8 @@ def _copy_sync(zip_path: str, dest_root: str) -> str:
     logger.info("Copying '%s' → '%s' (%.1f MB)", src.name, dst, total / (1024 * 1024))
     copied = 0
     CHUNK = 1024 * 1024  # 1 MB
+    _progress["bytes_total"] = total
+    _progress["bytes_done"] = 0
     with src.open("rb") as fsrc, dst.open("wb") as fdst:
         while True:
             chunk = fsrc.read(CHUNK)
@@ -151,6 +155,7 @@ def _copy_sync(zip_path: str, dest_root: str) -> str:
             copied += len(chunk)
             pct = int(copied / total * 100) if total > 0 else 0
             _progress["percent"] = pct
+            _progress["bytes_done"] = copied
             logger.debug("Copy progress: %d%% (%d / %d bytes)", pct, copied, total)
     shutil.copystat(src, dst)
     logger.info("Copy complete: '%s'", dst)
@@ -177,8 +182,11 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
 
     with zipfile.ZipFile(zip_p, "r") as zf:
         members = zf.infolist()
-        total = max(len(members), 1)
-        logger.debug("ZIP has %d members", len(members))
+        total_bytes = max(sum(m.file_size for m in members), 1)
+        logger.debug("ZIP has %d members, %d uncompressed bytes", len(members), total_bytes)
+        _progress["bytes_total"] = total_bytes
+        _progress["bytes_done"] = 0
+        extracted_bytes = 0
 
         if top_folder:
             # Case A: all entries under a single top-level subfolder.
@@ -189,11 +197,13 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
                 raise RuntimeError(
                     f"Folder '{top_folder}' already exists at destination: {game_dir}"
                 )
-            for i, member in enumerate(members):
+            for member in members:
                 zf.extract(member, dest_p)
-                pct = int((i + 1) / total * 100)
+                extracted_bytes += member.file_size
+                pct = int(extracted_bytes / total_bytes * 100)
                 _progress["percent"] = pct
-                logger.debug("Extract progress: %d%% (member %d/%d: %s)", pct, i + 1, total, member.filename)
+                _progress["bytes_done"] = extracted_bytes
+                logger.debug("Extract progress: %d%% (%d / %d bytes, %s)", pct, extracted_bytes, total_bytes, member.filename)
         else:
             # Case B: flat ZIP. Create a folder named after the ZIP file.
             folder_name = _safe_folder_name(zip_p.name)
@@ -205,11 +215,13 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
                     f"Folder '{folder_name}' already exists at destination: {game_dir}"
                 )
             game_dir.mkdir(parents=True)
-            for i, member in enumerate(members):
+            for member in members:
                 zf.extract(member, game_dir)
-                pct = int((i + 1) / total * 100)
+                extracted_bytes += member.file_size
+                pct = int(extracted_bytes / total_bytes * 100)
                 _progress["percent"] = pct
-                logger.debug("Extract progress: %d%% (member %d/%d: %s)", pct, i + 1, total, member.filename)
+                _progress["bytes_done"] = extracted_bytes
+                logger.debug("Extract progress: %d%% (%d / %d bytes, %s)", pct, extracted_bytes, total_bytes, member.filename)
 
     logger.info("Extraction complete, game_dir=%s", game_dir)
 
@@ -305,6 +317,8 @@ class Plugin:
         _progress = {
             "operation": "copy",
             "percent": 0,
+            "bytes_done": 0,
+            "bytes_total": 0,
             "done": False,
             "error": None,
             "result": None,
@@ -323,6 +337,8 @@ class Plugin:
         _progress = {
             "operation": "extract",
             "percent": 0,
+            "bytes_done": 0,
+            "bytes_total": 0,
             "done": False,
             "error": None,
             "result": None,
