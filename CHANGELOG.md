@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.15] - 2026-03-04
+
+### Fixed
+- `SyntaxError: unexpected token 'export'` — switched rollup output from `esm` to `cjs`;
+  with `externalGlobals` already eliminating all `require()` calls for the Decky runtime
+  globals, CJS produces `module.exports = ...` with zero `import`/`export`/`require`
+  statements, which Decky's eval-based plugin loader can execute cleanly
+- `[CRITICAL]: No plugin.json found in plugin ZIP` — Decky's ZIP installer requires plugin
+  files to be inside a single top-level directory (`decky-renpy-installer/`) rather than
+  at the ZIP root; fixed the packaging step in both `build:zip` and the GHA release workflow
+
 ## [0.0.14] - 2026-03-04
 
 ### Fixed

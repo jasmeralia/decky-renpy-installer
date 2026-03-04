@@ -1,11 +1,11 @@
 {
   "name": "renpy-installer",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "rollup -c",
-    "build:zip": "pnpm run build && zip -r decky-renpy-installer.zip plugin.json main.py dist/index.js package.json",
+    "build:zip": "pnpm run build && rm -rf /tmp/decky-pkg && mkdir -p /tmp/decky-pkg/decky-renpy-installer/dist && cp plugin.json main.py package.json /tmp/decky-pkg/decky-renpy-installer/ && cp dist/index.js /tmp/decky-pkg/decky-renpy-installer/dist/ && cd /tmp/decky-pkg && zip -r $OLDPWD/decky-renpy-installer.zip decky-renpy-installer/",
     "watch": "rollup -c -w",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit"

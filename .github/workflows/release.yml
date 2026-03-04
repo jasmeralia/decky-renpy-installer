@@ -35,7 +35,12 @@ jobs:
         run: pnpm run build
 
       - name: Package zip
-        run: zip -r decky-renpy-installer.zip plugin.json main.py dist/index.js package.json
+        run: |
+          mkdir -p /tmp/decky-pkg/decky-renpy-installer/dist
+          cp plugin.json main.py package.json /tmp/decky-pkg/decky-renpy-installer/
+          cp dist/index.js /tmp/decky-pkg/decky-renpy-installer/dist/
+          cd /tmp/decky-pkg
+          zip -r "$GITHUB_WORKSPACE/decky-renpy-installer.zip" decky-renpy-installer/
 
       - name: Get current tag
         id: tag

@@ -11,7 +11,7 @@ export default {
   input: "src/index.tsx",
   output: {
     file: "dist/index.js",
-    format: "esm",
+    format: "cjs",
     sourcemap: true,
     exports: "default",
   },
