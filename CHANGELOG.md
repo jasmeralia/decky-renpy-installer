@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.23] - 2026-03-04
+
+### Fixed
+- **Shortcut not appearing in Steam library**: `finishInstall` was passing `/bin/bash` as the
+  exe with the launcher script as an argument. `SteamClient.Apps.AddShortcut` derives the
+  shortcut name and start directory from the exe path, so the shortcut appeared as "bash" with
+  StartDir `/bin/`. Fixed by passing `launcherPath` directly as exe (empty args), matching how
+  all other working non-Steam shortcuts on Steam Deck are created.
+- **Log level resetting to error on panel reopen**: `handleLogLevelChange` was calling only
+  `backendSetLogLevel` (which saves via `settings.setSetting`) but not the standard
+  `saveSetting` pathway used by `loadSettings` on remount. Added `saveSetting("log_level",
+  level)` call so the selected level is persisted and restored correctly.
+
 ## [0.0.22] - 2026-03-04
 
 ### Added

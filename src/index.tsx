@@ -419,14 +419,14 @@ export default definePlugin((_serverAPI) => {
 
     const handleLogLevelChange = async (option: SingleDropdownOption) => {
       const level = option.data as LogLevel;
-      log("info", "Changing log level to:", level);
       _logLevel = level;
       setLogLevel(level);
       try {
+        await saveSetting("log_level", level);
         await backendSetLogLevel(level);
-        log("info", "Backend log level updated to:", level);
+        log("info", "Log level updated to:", level);
       } catch (e) {
-        log("warn", "backendSetLogLevel failed (frontend level still updated):", e);
+        log("warn", "handleLogLevelChange failed:", e);
       }
     };
 
@@ -438,9 +438,9 @@ export default definePlugin((_serverAPI) => {
       lType: "sh" | "exe"
     ) => {
       const gameName = basename(gameDir);
-      const exe = lType === "sh" ? "/bin/bash" : launcherPath;
-      const args = lType === "sh" ? `"${launcherPath}"` : "";
-      log("info", "finishInstall: gameName=%s exe=%s startDir=%s args=%s type=%s", gameName, exe, gameDir, args, lType);
+      const exe = launcherPath;
+      const args = "";
+      log("info", "finishInstall: gameName=%s exe=%s startDir=%s type=%s", gameName, exe, gameDir, lType);
       const addResult = await addShortcut(gameName, exe, gameDir, args);
       if (!addResult.ok) {
         throw new Error(`Could not add Steam shortcut: ${String(addResult.error)}`);
