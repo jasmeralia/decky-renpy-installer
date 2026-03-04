@@ -1,8 +1,11 @@
+import { readFileSync } from "fs";
 import resolve from "@rollup/plugin-node-resolve";
 import commonjs from "@rollup/plugin-commonjs";
 import replace from "@rollup/plugin-replace";
 import esbuild from "rollup-plugin-esbuild";
 import externalGlobals from "rollup-plugin-external-globals";
+
+const manifest = JSON.parse(readFileSync("./plugin.json", "utf-8"));
 
 export default {
   input: "src/index.tsx",
@@ -12,9 +15,9 @@ export default {
     sourcemap: true,
     exports: "default",
   },
-  // Only react, react-dom, and @decky/ui are provided by Decky's runtime as globals.
-  // Everything else (@decky/api, decky-frontend-lib, react-icons) is bundled.
-  external: ["react", "react-dom", "@decky/ui"],
+  // DO NOT add an `external` array — externalGlobals handles externalization
+  // and import-to-global replacement in one step. Having both conflicts and
+  // leaves `import` statements in the output.
   plugins: [
     replace({
       preventAssignment: true,
@@ -22,22 +25,27 @@ export default {
         "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV || "production"),
       },
     }),
-    // Replace import statements for Decky-provided globals with direct window variable
-    // references. This eliminates all top-level `import` statements from the output,
-    // which is required because Decky's plugin loader evaluates the bundle without a
-    // native ES module context.
-    externalGlobals({
-      react: "SP_REACT",
-      "react/jsx-runtime": "SP_JSX",
-      "react-dom": "SP_REACTDOM",
-      "@decky/ui": "DFL",
-    }),
     resolve({ browser: true }),
     commonjs(),
     esbuild({
       target: "es2022",
       tsconfig: "tsconfig.json",
       loaders: { ".tsx": "tsx" },
+    }),
+    // Must come AFTER all transformer plugins (commonjs, esbuild).
+    // Replaces import statements for Decky-provided globals with direct window
+    // variable references, eliminating all `import` statements from the output.
+    // Decky's plugin loader evaluates the bundle without a native ES module
+    // context, so any `import` statement is a SyntaxError.
+    //
+    // @decky/manifest is a virtual module consumed by @decky/api; we inline
+    // the manifest JSON directly so it doesn't remain as an import statement.
+    externalGlobals({
+      react: "SP_REACT",
+      "react/jsx-runtime": "SP_JSX",
+      "react-dom": "SP_REACTDOM",
+      "@decky/ui": "DFL",
+      "@decky/manifest": `(${JSON.stringify(manifest)})`,
     }),
   ],
 };

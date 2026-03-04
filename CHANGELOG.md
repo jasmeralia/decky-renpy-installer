@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.13] - 2026-03-04
+
+### Fixed
+- `SyntaxError: cannot use import outside of a module` (for real this time)
+  - `rollup-plugin-external-globals` must be placed *after* all transformer
+    plugins (`commonjs`, `esbuild`) per its documentation; placing it first
+    meant it never ran, leaving all `import` statements in the output
+  - Removed the redundant `external` array — `externalGlobals` handles both
+    externalization and import-to-global replacement; having both caused conflicts
+  - `@decky/api` internally imports `@decky/manifest` (a Decky virtual module);
+    added it to the globals map with the `plugin.json` content inlined as JSON,
+    eliminating the last remaining `import` statement
+
 ## [0.0.12] - 2026-03-04
 
 ### Changed
