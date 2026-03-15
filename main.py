@@ -67,6 +67,16 @@ def _get_mounted_devices() -> Set[str]:
     return devices
 
 
+def _find_udisksctl() -> Optional[str]:
+    """Locate the udisksctl binary, checking common paths."""
+    for candidate in ["/usr/bin/udisksctl", "/bin/udisksctl", "/usr/sbin/udisksctl"]:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    # Fall back to PATH lookup
+    result = shutil.which("udisksctl")
+    return result
+
+
 def _mount_usb_devices() -> List[str]:
     """Mount any unmounted USB partitions via udisksctl.
 
@@ -77,35 +87,49 @@ def _mount_usb_devices() -> List[str]:
 
     Returns a list of mount paths for devices that were successfully mounted.
     """
+    udisksctl = _find_udisksctl()
+    logger.info("udisksctl binary: %s", udisksctl)
+    if not udisksctl:
+        logger.error("udisksctl not found on this system — cannot auto-mount USB devices")
+        return []
+
+    # Log environment info for debugging
+    logger.info("Running as uid=%d euid=%d user=%s", os.getuid(), os.geteuid(), os.environ.get("USER", "(unset)"))
+    logger.info("PATH=%s", os.environ.get("PATH", "(unset)"))
+    logger.info("DBUS_SESSION_BUS_ADDRESS=%s", os.environ.get("DBUS_SESSION_BUS_ADDRESS", "(unset)"))
+
     mounted = _get_mounted_devices()
     # Find partition devices like /dev/sda1, /dev/sdb1, etc.
     partitions = sorted(glob.glob("/dev/sd[a-z]*[0-9]"))
-    logger.debug("USB partition scan: found %s, already mounted: %s", partitions, mounted)
+    logger.info("USB partition scan: partitions=%s, already mounted devices (sd* only)=%s",
+                partitions, [d for d in mounted if d.startswith("/dev/sd")])
+
+    if not partitions:
+        logger.info("No /dev/sd* partitions found — no USB drives to mount")
+        return []
 
     newly_mounted: List[str] = []
     for dev in partitions:
         if dev in mounted:
-            logger.debug("Skipping %s — already mounted", dev)
+            logger.info("Skipping %s — already mounted", dev)
             continue
-        logger.info("Attempting to mount %s via udisksctl", dev)
+        logger.info("Attempting to mount %s via %s", dev, udisksctl)
         try:
             result = subprocess.run(
-                ["udisksctl", "mount", "-b", dev, "--no-user-interaction"],
+                [udisksctl, "mount", "-b", dev, "--no-user-interaction"],
                 capture_output=True, text=True, timeout=15,
             )
+            logger.info("udisksctl exit code=%d stdout=%r stderr=%r",
+                        result.returncode, result.stdout.strip(), result.stderr.strip())
             if result.returncode == 0:
                 # Output looks like: "Mounted /dev/sda1 at /run/media/deck/USBDRIVE."
                 output = result.stdout.strip()
-                logger.info("udisksctl mount succeeded: %s", output)
-                # Extract mount path from output
                 if " at " in output:
                     mount_path = output.split(" at ", 1)[1].rstrip(".")
                     newly_mounted.append(mount_path)
             else:
-                logger.warning("udisksctl mount failed for %s: %s", dev, result.stderr.strip())
-        except FileNotFoundError:
-            logger.error("udisksctl not found — cannot auto-mount USB devices")
-            break
+                logger.warning("udisksctl mount failed for %s (rc=%d): %s",
+                               dev, result.returncode, result.stderr.strip())
         except subprocess.TimeoutExpired:
             logger.warning("udisksctl mount timed out for %s", dev)
         except Exception as e:

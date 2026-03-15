@@ -240,6 +240,7 @@ export default definePlugin((_serverAPI) => {
     const [zipFiles, setZipFiles] = useState<string[]>([]);
     const [settingsBusy, setSettingsBusy] = useState(false);
     const [settingsStatus, setSettingsStatus] = useState("");
+    const [mountStatus, setMountStatus] = useState("");
     const [logLevel, setLogLevel] = useState<LogLevel>("error");
 
     const [currentZipName, setCurrentZipName] = useState("");
@@ -361,9 +362,13 @@ export default definePlugin((_serverAPI) => {
           const newlyMounted = await mountUsbDevices();
           if (newlyMounted.length > 0) {
             log("info", "Auto-mounted USB devices:", newlyMounted);
+            setMountStatus(`Mounted: ${newlyMounted.join(", ")}`);
+          } else {
+            log("info", "No new USB devices to mount");
           }
         } catch (e) {
           log("warn", "mountUsbDevices failed (non-fatal):", e);
+          setMountStatus(`Mount error: ${String(e)}`);
         }
         try {
           const mounts = await listUsbMounts();
@@ -687,6 +692,11 @@ export default definePlugin((_serverAPI) => {
 
     return (
       <PanelSection title="Renpy ZIP Installer">
+        {mountStatus ? (
+          <PanelSectionRow>
+            <div style={{ fontSize: 11, opacity: 0.7 }}>{mountStatus}</div>
+          </PanelSectionRow>
+        ) : null}
         <PanelSectionRow>
           <div style={{ fontSize: 12, opacity: 0.8 }}>
             USB mounts:{" "}

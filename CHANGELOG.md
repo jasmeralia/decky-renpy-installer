@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.27] - 2026-03-15
+
+### Improved
+- USB auto-mount: added detailed diagnostic logging (uid, PATH,
+  DBUS_SESSION_BUS_ADDRESS, udisksctl binary location, per-device exit codes
+  and output) to troubleshoot mount failures in Gaming Mode.
+- Explicit `udisksctl` binary lookup checks `/usr/bin/udisksctl`,
+  `/bin/udisksctl`, `/usr/sbin/udisksctl` before falling back to PATH search.
+- UI now shows a mount status line ("Mounted: ..." or "Mount error: ...")
+  above the USB mounts display for immediate feedback.
+
 ## [0.0.26] - 2026-03-15
 
 ### Added
