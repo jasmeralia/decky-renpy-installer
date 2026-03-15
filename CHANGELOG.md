@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.32] - 2026-03-15
+
+### Changed
+- Replaced `udisksctl` mount approach with direct `sudo -n mount`. The
+  udisks2/polkit path was failing because Decky runs outside the desktop
+  session and polkit could not authorize without an interactive agent.
+  `sudo mount` bypasses polkit entirely since `deck` has passwordless sudo
+  on SteamOS. Mount points are created at `/run/media/deck/<label>` using
+  the filesystem label from `lsblk`.
+
 ## [0.0.31] - 2026-03-15
 
 ### Fixed

@@ -67,95 +67,40 @@ def _get_mounted_devices() -> Set[str]:
     return devices
 
 
-def _find_udisksctl() -> Optional[str]:
-    """Locate the udisksctl binary, checking common paths."""
-    for candidate in ["/usr/bin/udisksctl", "/bin/udisksctl", "/usr/sbin/udisksctl"]:
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    # Fall back to PATH lookup
-    result = shutil.which("udisksctl")
-    return result
 
-
-_POLKIT_RULE_PATH = "/etc/polkit-1/rules.d/50-decky-udisks-mount.rules"
-_POLKIT_RULE_CONTENT = """\
-// Installed by decky-renpy-installer: allow the deck user to mount
-// filesystems via udisks2 without interactive authentication (needed
-// because Decky plugins run outside the desktop session).
-polkit.addRule(function(action, subject) {
-    if (action.id === "org.freedesktop.udisks2.filesystem-mount" &&
-        subject.user === "deck") {
-        return polkit.Result.YES;
-    }
-});
-"""
-
-
-def _ensure_polkit_rule() -> bool:
-    """Install a polkit rule allowing the deck user to mount via udisks2.
-
-    Returns True if the rule is in place (already existed or was installed).
-    """
-    if os.path.isfile(_POLKIT_RULE_PATH):
-        logger.warning("[mount-diag] polkit rule already exists: %s", _POLKIT_RULE_PATH)
-        return True
-    logger.warning("[mount-diag] polkit rule missing, installing via sudo: %s", _POLKIT_RULE_PATH)
+def _get_partition_label(dev: str) -> str:
+    """Return the filesystem label for a block device, or its base name as fallback."""
     try:
         result = subprocess.run(
-            ["sudo", "-n", "tee", _POLKIT_RULE_PATH],
-            input=_POLKIT_RULE_CONTENT, capture_output=True, text=True, timeout=10,
+            ["lsblk", "-no", "LABEL", dev],
+            capture_output=True, text=True, timeout=5,
         )
-        if result.returncode == 0:
-            logger.warning("[mount-diag] polkit rule installed successfully")
-            return True
-        logger.warning("[mount-diag] sudo tee failed (rc=%d): %s", result.returncode, result.stderr.strip())
-    except Exception as e:
-        logger.warning("[mount-diag] failed to install polkit rule: %s", e)
-    return False
+        label = result.stdout.strip()
+        if label:
+            return label
+    except Exception:
+        pass
+    # Fallback: use device base name (e.g. "sda1")
+    return os.path.basename(dev)
 
 
 def _mount_usb_devices() -> List[str]:
-    """Mount any unmounted USB partitions via udisksctl.
+    """Mount any unmounted USB partitions via sudo mount.
 
     Scans /dev/sd* for partition block devices (e.g. /dev/sda1) that are not
-    yet present in /proc/mounts, then calls ``udisksctl mount -b <device>``
-    for each one.  This is the same mechanism that Dolphin and other file
-    managers use under the hood (udisks2 D-Bus service).
+    yet present in /proc/mounts, then mounts each one under /run/media/deck/.
 
-    On first run, installs a polkit rule allowing the deck user to mount
-    without interactive authentication (Decky runs outside the desktop
-    session so the normal session-based polkit authorization does not apply).
+    Uses ``sudo -n mount`` directly rather than udisksctl because Decky's
+    plugin_loader runs outside the desktop session, which prevents udisks2's
+    polkit authorization from succeeding.  The ``deck`` user on SteamOS has
+    passwordless sudo.
 
     Returns a list of mount paths for devices that were successfully mounted.
     """
     # Use WARNING level for mount diagnostics so they always appear in logs
     # regardless of the user's log level setting.
-    _ensure_polkit_rule()
-
-    udisksctl = _find_udisksctl()
-    logger.warning("[mount-diag] udisksctl binary: %s", udisksctl)
-    if not udisksctl:
-        logger.error("[mount-diag] udisksctl not found on this system — cannot auto-mount USB devices")
-        return []
-
-    uid = os.getuid()
     logger.warning("[mount-diag] uid=%d euid=%d user=%s",
-                   uid, os.geteuid(), os.environ.get("USER", "(unset)"))
-    logger.warning("[mount-diag] PATH=%s", os.environ.get("PATH", "(unset)"))
-
-    # Decky's plugin_loader runs outside the desktop session, so
-    # DBUS_SESSION_BUS_ADDRESS is unset.  udisksctl needs the session bus
-    # to talk to udisks2 and get polkit authorization.  On systemd systems
-    # the user session bus socket lives at /run/user/<uid>/bus.
-    env = os.environ.copy()
-    dbus_addr = env.get("DBUS_SESSION_BUS_ADDRESS", "")
-    bus_socket = f"/run/user/{uid}/bus"
-    if not dbus_addr and os.path.exists(bus_socket):
-        dbus_addr = f"unix:path={bus_socket}"
-        env["DBUS_SESSION_BUS_ADDRESS"] = dbus_addr
-        logger.warning("[mount-diag] DBUS_SESSION_BUS_ADDRESS was unset, injecting %s", dbus_addr)
-    else:
-        logger.warning("[mount-diag] DBUS_SESSION_BUS_ADDRESS=%s", dbus_addr or "(unset)")
+                   os.getuid(), os.geteuid(), os.environ.get("USER", "(unset)"))
 
     mounted = _get_mounted_devices()
     partitions = sorted(glob.glob("/dev/sd[a-z]*[0-9]"))
@@ -171,19 +116,25 @@ def _mount_usb_devices() -> List[str]:
         if dev in mounted:
             logger.warning("[mount-diag] Skipping %s — already mounted", dev)
             continue
-        logger.warning("[mount-diag] Attempting to mount %s", dev)
+
+        label = _get_partition_label(dev)
+        mount_point = f"/run/media/deck/{label}"
+        logger.warning("[mount-diag] Mounting %s → %s (label=%r)", dev, mount_point, label)
+
         try:
+            # Create the mount point directory
+            subprocess.run(
+                ["sudo", "-n", "mkdir", "-p", mount_point],
+                capture_output=True, text=True, timeout=5,
+            )
             result = subprocess.run(
-                [udisksctl, "mount", "-b", dev, "--no-user-interaction"],
-                capture_output=True, text=True, timeout=15, env=env,
+                ["sudo", "-n", "mount", dev, mount_point],
+                capture_output=True, text=True, timeout=15,
             )
             logger.warning("[mount-diag] %s → rc=%d stdout=%r stderr=%r",
                            dev, result.returncode, result.stdout.strip(), result.stderr.strip())
             if result.returncode == 0:
-                output = result.stdout.strip()
-                if " at " in output:
-                    mount_path = output.split(" at ", 1)[1].rstrip(".")
-                    newly_mounted.append(mount_path)
+                newly_mounted.append(mount_point)
             else:
                 logger.warning("[mount-diag] mount failed for %s (rc=%d): %s",
                                dev, result.returncode, result.stderr.strip())
