@@ -77,6 +77,43 @@ def _find_udisksctl() -> Optional[str]:
     return result
 
 
+_POLKIT_RULE_PATH = "/etc/polkit-1/rules.d/50-decky-udisks-mount.rules"
+_POLKIT_RULE_CONTENT = """\
+// Installed by decky-renpy-installer: allow the deck user to mount
+// filesystems via udisks2 without interactive authentication (needed
+// because Decky plugins run outside the desktop session).
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.udisks2.filesystem-mount" &&
+        subject.user === "deck") {
+        return polkit.Result.YES;
+    }
+});
+"""
+
+
+def _ensure_polkit_rule() -> bool:
+    """Install a polkit rule allowing the deck user to mount via udisks2.
+
+    Returns True if the rule is in place (already existed or was installed).
+    """
+    if os.path.isfile(_POLKIT_RULE_PATH):
+        logger.warning("[mount-diag] polkit rule already exists: %s", _POLKIT_RULE_PATH)
+        return True
+    logger.warning("[mount-diag] polkit rule missing, installing via sudo: %s", _POLKIT_RULE_PATH)
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "tee", _POLKIT_RULE_PATH],
+            input=_POLKIT_RULE_CONTENT, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            logger.warning("[mount-diag] polkit rule installed successfully")
+            return True
+        logger.warning("[mount-diag] sudo tee failed (rc=%d): %s", result.returncode, result.stderr.strip())
+    except Exception as e:
+        logger.warning("[mount-diag] failed to install polkit rule: %s", e)
+    return False
+
+
 def _mount_usb_devices() -> List[str]:
     """Mount any unmounted USB partitions via udisksctl.
 
@@ -85,10 +122,16 @@ def _mount_usb_devices() -> List[str]:
     for each one.  This is the same mechanism that Dolphin and other file
     managers use under the hood (udisks2 D-Bus service).
 
+    On first run, installs a polkit rule allowing the deck user to mount
+    without interactive authentication (Decky runs outside the desktop
+    session so the normal session-based polkit authorization does not apply).
+
     Returns a list of mount paths for devices that were successfully mounted.
     """
     # Use WARNING level for mount diagnostics so they always appear in logs
     # regardless of the user's log level setting.
+    _ensure_polkit_rule()
+
     udisksctl = _find_udisksctl()
     logger.warning("[mount-diag] udisksctl binary: %s", udisksctl)
     if not udisksctl:

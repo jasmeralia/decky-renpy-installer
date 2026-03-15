@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.31] - 2026-03-15
+
+### Fixed
+- USB auto-mount polkit authorization: Decky runs outside the desktop session
+  so the normal session-based polkit auth for udisks2 mounts does not apply.
+  The plugin now auto-installs a polkit rule
+  (`/etc/polkit-1/rules.d/50-decky-udisks-mount.rules`) on first run via
+  `sudo -n tee` that allows the `deck` user to mount filesystems via udisks2
+  without interactive authentication.
+
 ## [0.0.30] - 2026-03-15
 
 ### Fixed
