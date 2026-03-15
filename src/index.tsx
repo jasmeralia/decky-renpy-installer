@@ -113,6 +113,10 @@ async function detectSdMount(): Promise<string | null> {
   return call<[], string | null>("detect_sd_mount");
 }
 
+async function mountUsbDevices(): Promise<string[]> {
+  return call<[], string[]>("mount_usb_devices");
+}
+
 async function listZipFiles(mount_path: string): Promise<string[]> {
   return call<[string], string[]>("list_zip_files", mount_path);
 }
@@ -351,6 +355,15 @@ export default definePlugin((_serverAPI) => {
           } catch (e) {
             log("warn", "detectSdMount failed:", e);
           }
+        }
+        // Auto-mount any unmounted USB partitions before listing
+        try {
+          const newlyMounted = await mountUsbDevices();
+          if (newlyMounted.length > 0) {
+            log("info", "Auto-mounted USB devices:", newlyMounted);
+          }
+        } catch (e) {
+          log("warn", "mountUsbDevices failed (non-fatal):", e);
         }
         try {
           const mounts = await listUsbMounts();

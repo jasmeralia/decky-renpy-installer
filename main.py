@@ -1,8 +1,10 @@
 import asyncio
+import glob
 import logging
 import os
 import re
 import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -49,6 +51,66 @@ def _safe_folder_name(name: str) -> str:
 
 def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
+
+
+def _get_mounted_devices() -> Set[str]:
+    """Return the set of device paths currently mounted (e.g. {'/dev/sda1'})."""
+    devices: Set[str] = set()
+    try:
+        with open("/proc/mounts", "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 1:
+                    devices.add(parts[0])
+    except Exception as e:
+        logger.exception("Failed to read /proc/mounts for device list: %s", e)
+    return devices
+
+
+def _mount_usb_devices() -> List[str]:
+    """Mount any unmounted USB partitions via udisksctl.
+
+    Scans /dev/sd* for partition block devices (e.g. /dev/sda1) that are not
+    yet present in /proc/mounts, then calls ``udisksctl mount -b <device>``
+    for each one.  This is the same mechanism that Dolphin and other file
+    managers use under the hood (udisks2 D-Bus service).
+
+    Returns a list of mount paths for devices that were successfully mounted.
+    """
+    mounted = _get_mounted_devices()
+    # Find partition devices like /dev/sda1, /dev/sdb1, etc.
+    partitions = sorted(glob.glob("/dev/sd[a-z]*[0-9]"))
+    logger.debug("USB partition scan: found %s, already mounted: %s", partitions, mounted)
+
+    newly_mounted: List[str] = []
+    for dev in partitions:
+        if dev in mounted:
+            logger.debug("Skipping %s — already mounted", dev)
+            continue
+        logger.info("Attempting to mount %s via udisksctl", dev)
+        try:
+            result = subprocess.run(
+                ["udisksctl", "mount", "-b", dev, "--no-user-interaction"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode == 0:
+                # Output looks like: "Mounted /dev/sda1 at /run/media/deck/USBDRIVE."
+                output = result.stdout.strip()
+                logger.info("udisksctl mount succeeded: %s", output)
+                # Extract mount path from output
+                if " at " in output:
+                    mount_path = output.split(" at ", 1)[1].rstrip(".")
+                    newly_mounted.append(mount_path)
+            else:
+                logger.warning("udisksctl mount failed for %s: %s", dev, result.stderr.strip())
+        except FileNotFoundError:
+            logger.error("udisksctl not found — cannot auto-mount USB devices")
+            break
+        except subprocess.TimeoutExpired:
+            logger.warning("udisksctl mount timed out for %s", dev)
+        except Exception as e:
+            logger.exception("Unexpected error mounting %s: %s", dev, e)
+    return newly_mounted
 
 
 def _list_mount_points() -> List[str]:
@@ -297,6 +359,13 @@ class Plugin:
         mount = _find_sd_mount()
         logger.debug("detect_sd_mount returning: %s", mount)
         return mount
+
+    async def mount_usb_devices(self) -> List[str]:
+        """Mount any unmounted USB partitions and return newly-mounted paths."""
+        logger.info("Auto-mounting unmounted USB devices...")
+        newly = await asyncio.to_thread(_mount_usb_devices)
+        logger.info("Auto-mount complete: %d new mount(s): %s", len(newly), newly)
+        return newly
 
     async def list_zip_files(self, mount_path: str) -> List[str]:
         logger.info("Listing ZIP files in: %s", mount_path)

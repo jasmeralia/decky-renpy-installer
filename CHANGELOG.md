@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.26] - 2026-03-15
+
+### Added
+- Auto-mount unmounted USB drives when the plugin opens. Previously, plugging
+  in a USB thumb drive in Gaming Mode required opening Dolphin (or another file
+  manager) to trigger the mount before the plugin could see it. The plugin now
+  calls `udisksctl mount` for any unmounted `/dev/sd*` partitions on startup,
+  the same mechanism that Dolphin uses under the hood. Already-mounted drives
+  are skipped.
+- New backend method `mount_usb_devices()`.
+
 ## [0.0.25] - 2026-03-04
 
 ### Added

@@ -78,6 +78,7 @@ Code quality rules:
 - Deprecation warnings must be resolved; if a dep is deprecated, upgrade it or add a pnpm override
 
 Current backend methods:
+- mount_usb_devices() — auto-mounts unmounted /dev/sd* partitions via udisksctl; returns list of newly-mounted paths
 - list_usb_mounts()
 - detect_sd_mount()
 - list_zip_files(mount_path)
