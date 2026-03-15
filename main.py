@@ -87,53 +87,54 @@ def _mount_usb_devices() -> List[str]:
 
     Returns a list of mount paths for devices that were successfully mounted.
     """
+    # Use WARNING level for mount diagnostics so they always appear in logs
+    # regardless of the user's log level setting.
     udisksctl = _find_udisksctl()
-    logger.info("udisksctl binary: %s", udisksctl)
+    logger.warning("[mount-diag] udisksctl binary: %s", udisksctl)
     if not udisksctl:
-        logger.error("udisksctl not found on this system — cannot auto-mount USB devices")
+        logger.error("[mount-diag] udisksctl not found on this system — cannot auto-mount USB devices")
         return []
 
-    # Log environment info for debugging
-    logger.info("Running as uid=%d euid=%d user=%s", os.getuid(), os.geteuid(), os.environ.get("USER", "(unset)"))
-    logger.info("PATH=%s", os.environ.get("PATH", "(unset)"))
-    logger.info("DBUS_SESSION_BUS_ADDRESS=%s", os.environ.get("DBUS_SESSION_BUS_ADDRESS", "(unset)"))
+    logger.warning("[mount-diag] uid=%d euid=%d user=%s",
+                   os.getuid(), os.geteuid(), os.environ.get("USER", "(unset)"))
+    logger.warning("[mount-diag] PATH=%s", os.environ.get("PATH", "(unset)"))
+    logger.warning("[mount-diag] DBUS_SESSION_BUS_ADDRESS=%s",
+                   os.environ.get("DBUS_SESSION_BUS_ADDRESS", "(unset)"))
 
     mounted = _get_mounted_devices()
-    # Find partition devices like /dev/sda1, /dev/sdb1, etc.
     partitions = sorted(glob.glob("/dev/sd[a-z]*[0-9]"))
-    logger.info("USB partition scan: partitions=%s, already mounted devices (sd* only)=%s",
-                partitions, [d for d in mounted if d.startswith("/dev/sd")])
+    logger.warning("[mount-diag] partitions=%s, already mounted sd*=%s",
+                   partitions, [d for d in mounted if d.startswith("/dev/sd")])
 
     if not partitions:
-        logger.info("No /dev/sd* partitions found — no USB drives to mount")
+        logger.warning("[mount-diag] No /dev/sd* partitions found — no USB drives to mount")
         return []
 
     newly_mounted: List[str] = []
     for dev in partitions:
         if dev in mounted:
-            logger.info("Skipping %s — already mounted", dev)
+            logger.warning("[mount-diag] Skipping %s — already mounted", dev)
             continue
-        logger.info("Attempting to mount %s via %s", dev, udisksctl)
+        logger.warning("[mount-diag] Attempting to mount %s", dev)
         try:
             result = subprocess.run(
                 [udisksctl, "mount", "-b", dev, "--no-user-interaction"],
                 capture_output=True, text=True, timeout=15,
             )
-            logger.info("udisksctl exit code=%d stdout=%r stderr=%r",
-                        result.returncode, result.stdout.strip(), result.stderr.strip())
+            logger.warning("[mount-diag] %s → rc=%d stdout=%r stderr=%r",
+                           dev, result.returncode, result.stdout.strip(), result.stderr.strip())
             if result.returncode == 0:
-                # Output looks like: "Mounted /dev/sda1 at /run/media/deck/USBDRIVE."
                 output = result.stdout.strip()
                 if " at " in output:
                     mount_path = output.split(" at ", 1)[1].rstrip(".")
                     newly_mounted.append(mount_path)
             else:
-                logger.warning("udisksctl mount failed for %s (rc=%d): %s",
+                logger.warning("[mount-diag] mount failed for %s (rc=%d): %s",
                                dev, result.returncode, result.stderr.strip())
         except subprocess.TimeoutExpired:
-            logger.warning("udisksctl mount timed out for %s", dev)
+            logger.warning("[mount-diag] mount timed out for %s", dev)
         except Exception as e:
-            logger.exception("Unexpected error mounting %s: %s", dev, e)
+            logger.warning("[mount-diag] unexpected error mounting %s: %s", dev, e)
     return newly_mounted
 
 
@@ -340,7 +341,17 @@ class Plugin:
     # --- Settings ---
 
     async def settings_read(self) -> Dict[str, Any]:
-        data = settings.read()
+        try:
+            data = settings.read()
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        # Ensure individually-set keys are included even if read() returns stale data
+        for key in ("log_level", "sd_card_path", "default_dest_root"):
+            val = settings.getSetting(key, None)
+            if val is not None:
+                data[key] = val
         logger.debug("settings_read: %s", data)
         return data
 

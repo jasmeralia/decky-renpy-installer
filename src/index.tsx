@@ -362,9 +362,10 @@ export default definePlugin((_serverAPI) => {
           const newlyMounted = await mountUsbDevices();
           if (newlyMounted.length > 0) {
             log("info", "Auto-mounted USB devices:", newlyMounted);
-            setMountStatus(`Mounted: ${newlyMounted.join(", ")}`);
+            setMountStatus(`Auto-mounted: ${newlyMounted.join(", ")}`);
           } else {
             log("info", "No new USB devices to mount");
+            setMountStatus("No unmounted USB partitions found.");
           }
         } catch (e) {
           log("warn", "mountUsbDevices failed (non-fatal):", e);

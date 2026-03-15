@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.28] - 2026-03-15
+
+### Fixed
+- Log level setting not persisting across panel reopens: `settings_read` now
+  supplements the result from `settings.read()` with individually-set keys
+  via `getSetting()`, ensuring recently-saved values are always returned.
+
+### Improved
+- USB auto-mount diagnostics now log at WARNING level so they always appear
+  in Decky logs regardless of the user's log level setting. All mount-related
+  log lines are prefixed with `[mount-diag]` for easy filtering.
+- Mount status line always shows feedback: "Auto-mounted: ..." when drives
+  were mounted, "No unmounted USB partitions found." when none needed mounting,
+  or "Mount error: ..." on failure.
+
 ## [0.0.27] - 2026-03-15
 
 ### Improved
