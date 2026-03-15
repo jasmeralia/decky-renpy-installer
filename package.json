@@ -1,6 +1,6 @@
 {
   "name": "renpy-installer",
-  "version": "0.0.32",
+  "version": "0.0.33",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,7 +19,8 @@
   },
   "pnpm": {
     "overrides": {
-      "rollup@>=4.0.0 <4.59.0": "4.59.0"
+      "rollup@>=4.0.0 <4.59.0": "4.59.0",
+      "flatted@<3.4.0": "3.4.0"
     }
   },
   "devDependencies": {

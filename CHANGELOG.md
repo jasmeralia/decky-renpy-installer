@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.33] - 2026-03-15
+
+### Security
+- Override `flatted` to >= 3.4.0 to resolve GHSA-25h7-pfq9-p65f (unbounded
+  recursion DoS in `parse()` revive phase). Dev-only transitive dep via
+  eslint → file-entry-cache → flat-cache → flatted.
+
 ## [0.0.32] - 2026-03-15
 
 ### Changed
