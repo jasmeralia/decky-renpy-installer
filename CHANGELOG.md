@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.29] - 2026-03-15
+
+### Changed
+- Release ZIP filename now includes the version number
+  (e.g. `decky-renpy-installer-0.0.29.zip` instead of
+  `decky-renpy-installer.zip`), in both the GitHub Actions workflow and
+  the local `build:zip` script.
+
 ## [0.0.28] - 2026-03-15
 
 ### Fixed

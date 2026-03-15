@@ -40,7 +40,8 @@ jobs:
           cp plugin.json main.py package.json /tmp/decky-pkg/decky-renpy-installer/
           cp dist/index.js /tmp/decky-pkg/decky-renpy-installer/dist/
           cd /tmp/decky-pkg
-          zip -r "$GITHUB_WORKSPACE/decky-renpy-installer.zip" decky-renpy-installer/
+          version="${GITHUB_REF#refs/tags/v}"
+          zip -r "$GITHUB_WORKSPACE/decky-renpy-installer-${version}.zip" decky-renpy-installer/
 
       - name: Get current tag
         id: tag
@@ -87,8 +88,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          version="${{ steps.tag.outputs.name }}"
+          version="${version#v}"
           gh release create "${{ steps.tag.outputs.name }}" \
-            decky-renpy-installer.zip \
+            "decky-renpy-installer-${version}.zip" \
             --title "${{ steps.tag.outputs.name }}" \
             --notes "${{ steps.changelog.outputs.notes }}" \
             --draft
