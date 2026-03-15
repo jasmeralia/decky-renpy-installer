@@ -1,7 +1,7 @@
 {
   "name": "Renpy Installer",
   "author": "Morgan Blackthorne, Winds of Storm",
-  "version": "0.0.29",
+  "version": "0.0.30",
   "description": "Install Renpy games from a ZIP on USB to SD/internal storage and add them to Steam as a Non-Steam shortcut.",
   "main": "main.py",
   "api_version": 1,

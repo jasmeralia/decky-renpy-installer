@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.30] - 2026-03-15
+
+### Fixed
+- USB auto-mount failing with "NotAuthorizedCanObtain" polkit error: Decky's
+  plugin_loader runs outside the desktop session so `DBUS_SESSION_BUS_ADDRESS`
+  is unset. `udisksctl` needs the session bus to get polkit authorization.
+  Now auto-detects the user session bus socket at `/run/user/<uid>/bus` and
+  injects it into the environment before calling `udisksctl`.
+
 ## [0.0.29] - 2026-03-15
 
 ### Changed

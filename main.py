@@ -95,11 +95,24 @@ def _mount_usb_devices() -> List[str]:
         logger.error("[mount-diag] udisksctl not found on this system — cannot auto-mount USB devices")
         return []
 
+    uid = os.getuid()
     logger.warning("[mount-diag] uid=%d euid=%d user=%s",
-                   os.getuid(), os.geteuid(), os.environ.get("USER", "(unset)"))
+                   uid, os.geteuid(), os.environ.get("USER", "(unset)"))
     logger.warning("[mount-diag] PATH=%s", os.environ.get("PATH", "(unset)"))
-    logger.warning("[mount-diag] DBUS_SESSION_BUS_ADDRESS=%s",
-                   os.environ.get("DBUS_SESSION_BUS_ADDRESS", "(unset)"))
+
+    # Decky's plugin_loader runs outside the desktop session, so
+    # DBUS_SESSION_BUS_ADDRESS is unset.  udisksctl needs the session bus
+    # to talk to udisks2 and get polkit authorization.  On systemd systems
+    # the user session bus socket lives at /run/user/<uid>/bus.
+    env = os.environ.copy()
+    dbus_addr = env.get("DBUS_SESSION_BUS_ADDRESS", "")
+    bus_socket = f"/run/user/{uid}/bus"
+    if not dbus_addr and os.path.exists(bus_socket):
+        dbus_addr = f"unix:path={bus_socket}"
+        env["DBUS_SESSION_BUS_ADDRESS"] = dbus_addr
+        logger.warning("[mount-diag] DBUS_SESSION_BUS_ADDRESS was unset, injecting %s", dbus_addr)
+    else:
+        logger.warning("[mount-diag] DBUS_SESSION_BUS_ADDRESS=%s", dbus_addr or "(unset)")
 
     mounted = _get_mounted_devices()
     partitions = sorted(glob.glob("/dev/sd[a-z]*[0-9]"))
@@ -119,7 +132,7 @@ def _mount_usb_devices() -> List[str]:
         try:
             result = subprocess.run(
                 [udisksctl, "mount", "-b", dev, "--no-user-interaction"],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=15, env=env,
             )
             logger.warning("[mount-diag] %s → rc=%d stdout=%r stderr=%r",
                            dev, result.returncode, result.stdout.strip(), result.stderr.strip())
