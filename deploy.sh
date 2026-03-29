@@ -2,7 +2,7 @@
 set -e
 
 AUDIT_LEVEL="${1:-low}"
-RAW_DECK="${2:-deck@orion.local}"
+RAW_DECK="${2:-deck@192.168.1.65}"
 # Prepend default user 'deck' if no user@ prefix was given
 if [[ "${RAW_DECK}" != *@* ]]; then
     DECK="deck@${RAW_DECK}"
@@ -41,7 +41,7 @@ pnpm run build
 echo "✅ Build complete"
 
 echo "🚀 Deploying to ${DECK}..."
-rsync -av --rsync-path="sudo -n rsync" plugin.json main.py "${DECK}:/home/deck/homebrew/plugins/${PLUGIN}/"
+rsync -av --rsync-path="sudo -n rsync" plugin.json package.json main.py "${DECK}:/home/deck/homebrew/plugins/${PLUGIN}/"
 rsync -av --rsync-path="sudo -n rsync" --delete ./dist/ "${DECK}:/home/deck/homebrew/plugins/${PLUGIN}/dist/"
 ssh "${DECK}" "sudo -n systemctl restart plugin_loader"
 echo "✅ Deploy complete"

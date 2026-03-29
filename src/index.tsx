@@ -239,6 +239,7 @@ export default definePlugin((_serverAPI) => {
     const [usbPath, setUsbPath] = useState("");
     const [zipFiles, setZipFiles] = useState<string[]>([]);
     const [settingsBusy, setSettingsBusy] = useState(false);
+    const [zipPage, setZipPage] = useState(0);
     const [settingsStatus, setSettingsStatus] = useState("");
     const [mountStatus, setMountStatus] = useState("");
     const [logLevel, setLogLevel] = useState<LogLevel>("error");
@@ -375,7 +376,25 @@ export default definePlugin((_serverAPI) => {
           const mounts = await listUsbMounts();
           log("info", "USB mounts found:", mounts);
           setUsbMounts(mounts);
-          if (mounts.length > 0) setUsbPath(mounts[0]);
+          if (mounts.length > 0) {
+            setUsbPath(mounts[0]);
+            // Use local variable — usbPath state is still "" at this point
+            setSettingsBusy(true);
+            setSettingsStatus("Scanning USB for ZIP files…");
+            try {
+              const files = await listZipFiles(mounts[0]);
+              log("info", "Auto-scan found ZIP files:", files);
+              setZipFiles(files);
+              setZipPage(0);
+              setSettingsStatus(`Found ${files.length} ZIP file(s).`);
+            } catch (e) {
+              log("warn", "Auto-scan listZipFiles failed:", e);
+              setZipFiles([]);
+              setSettingsStatus(`No ZIP files found: ${String(e)}`);
+            } finally {
+              setSettingsBusy(false);
+            }
+          }
         } catch (e) {
           log("warn", "listUsbMounts failed:", e);
           setUsbMounts([]);
@@ -398,6 +417,7 @@ export default definePlugin((_serverAPI) => {
         const files = await listZipFiles(usbPath);
         log("info", "Found ZIP files:", files);
         setZipFiles(files);
+        setZipPage(0);
         setSettingsStatus(`Found ${files.length} ZIP file(s).`);
       } catch (e) {
         log("error", "listZipFiles failed:", e);
@@ -734,19 +754,60 @@ export default definePlugin((_serverAPI) => {
           </ButtonItem>
         </PanelSectionRow>
 
-        <PanelSectionRow>
-          <div style={{ fontSize: 12, opacity: 0.8 }}>
-            {zipFiles.length ? "Select a ZIP to install:" : "No ZIPs loaded."}
-          </div>
-        </PanelSectionRow>
+        {(() => {
+          const ZIP_PAGE_SIZE = 10;
+          const zipPageCount = Math.ceil(zipFiles.length / ZIP_PAGE_SIZE);
+          const zipPageFiles = zipFiles.slice(
+            zipPage * ZIP_PAGE_SIZE,
+            (zipPage + 1) * ZIP_PAGE_SIZE
+          );
+          return (
+            <>
+              <PanelSectionRow>
+                <div style={{ fontSize: 12, opacity: 0.8 }}>
+                  {zipFiles.length
+                    ? zipPageCount > 1
+                      ? `Select a ZIP to install (page ${zipPage + 1}/${zipPageCount}):`
+                      : "Select a ZIP to install:"
+                    : "No ZIPs loaded."}
+                </div>
+              </PanelSectionRow>
 
-        {zipFiles.map((p) => (
-          <PanelSectionRow key={p}>
-            <ButtonItem layout="below" onClick={() => handleZipSelect(p)}>
-              {basename(p)}
-            </ButtonItem>
-          </PanelSectionRow>
-        ))}
+              {zipPageFiles.map((p) => (
+                <PanelSectionRow key={p}>
+                  <ButtonItem layout="below" onClick={() => handleZipSelect(p)}>
+                    {basename(p)}
+                  </ButtonItem>
+                </PanelSectionRow>
+              ))}
+
+              {zipPageCount > 1 && (
+                <PanelSectionRow>
+                  <ButtonItem
+                    layout="below"
+                    onClick={() => setZipPage((pg) => Math.max(0, pg - 1))}
+                    disabled={zipPage === 0}
+                  >
+                    Previous page
+                  </ButtonItem>
+                </PanelSectionRow>
+              )}
+              {zipPageCount > 1 && (
+                <PanelSectionRow>
+                  <ButtonItem
+                    layout="below"
+                    onClick={() =>
+                      setZipPage((pg) => Math.min(zipPageCount - 1, pg + 1))
+                    }
+                    disabled={zipPage >= zipPageCount - 1}
+                  >
+                    Next page
+                  </ButtonItem>
+                </PanelSectionRow>
+              )}
+            </>
+          );
+        })()}
 
         <PanelSectionRow>
           <TextField

@@ -164,7 +164,14 @@ def _list_mount_points() -> List[str]:
         logger.debug("USB mount scan found %d mount(s): %s", len(mounts), mounts)
     except Exception as e:
         logger.exception("Failed to read /proc/mounts: %s", e)
-    return sorted(set(mounts))
+    live: List[str] = []
+    for mnt in sorted(set(mounts)):
+        try:
+            os.listdir(mnt)
+            live.append(mnt)
+        except OSError as e:
+            logger.warning("Skipping stale mount point %s (%s)", mnt, e)
+    return live
 
 
 def _find_sd_mount() -> Optional[str]:
@@ -191,11 +198,22 @@ def _list_zip_files(mount_path: Path) -> List[str]:
         raise RuntimeError(
             f"USB mount path does not exist or is not a directory: {mount_path}"
         )
-    zip_files = [p for p in mount_path.rglob("*.zip") if p.is_file()]
+    zip_files: List[Path] = []
+    for root, _dirs, files in os.walk(str(mount_path)):
+        for name in files:
+            if name.lower().endswith(".zip"):
+                zip_files.append(Path(root) / name)
     if not zip_files:
         logger.warning("No .zip files found on USB drive: %s", mount_path)
         raise RuntimeError(f"No .zip files found on USB drive: {mount_path}")
-    zip_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+    def _mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    zip_files.sort(key=_mtime, reverse=True)
     logger.info("Found %d ZIP file(s) on USB: %s", len(zip_files), [str(p) for p in zip_files])
     return [str(p) for p in zip_files]
 
