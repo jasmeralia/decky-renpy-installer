@@ -87,6 +87,9 @@ Current backend methods:
 - get_progress() — polls current op: {operation, percent, done, error, result}
 - get_launchers(game_dir) — returns {launchers: [...paths], type: "sh"|"exe"|null}
 - ensure_executable(launcher_path) — chmod +x
+- list_save_folders(save_root) — returns immediate subfolders under the configured save root
+- can_link_saves(game_dir) — returns whether `<game_dir>/game/saves` can be created safely
+- create_save_symlink(game_dir, save_folder) — creates `<game_dir>/game/saves` symlink if absent
 - get_log_level() — returns current log level string ("debug"|"info"|"warn"|"error")
 - set_log_level(level) — sets log level in settings, applies immediately, returns bool
 - settings_read/settings_set/settings_commit
@@ -106,7 +109,7 @@ On every change, without exception unless explicitly instructed otherwise:
 
 1. Run lint: `pnpm run lint` — fix all errors before continuing. Warnings are treated as errors; the lint script must exit clean with zero output.
 2. Run build: `pnpm run build` — must succeed with no errors before continuing.
-3. Run tests if any are configured (check package.json scripts).
+3. Run tests: `pnpm test` — runs Vitest frontend tests and pytest backend tests.
 4. Bump the **patch** version only in both `package.json` and `plugin.json`
    (e.g. 0.0.1 → 0.0.2). Never bump major/minor unless the user asks.
 5. Update `CHANGELOG.md` with a new `## [version] - YYYY-MM-DD` section

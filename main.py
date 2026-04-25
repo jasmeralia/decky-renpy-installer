@@ -1,5 +1,6 @@
 import asyncio
 import glob
+import json
 import logging
 import os
 import re
@@ -7,6 +8,8 @@ import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+import time
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
 from settings import SettingsManager  # provided by decky-loader runtime
@@ -30,11 +33,26 @@ _progress: Dict[str, Any] = {
     "percent": 0,
     "bytes_done": 0,
     "bytes_total": 0,
+    "current_file": "",
+    "updated_at": time.time(),
     "done": True,
     "error": None,
     "result": None,
 }
 _active_task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
+_EXTRACT_TIMEOUT_SECONDS = 7200
+
+
+@dataclass(frozen=True)
+class UsbPartition:
+    path: str
+    label: str
+    mountpoints: List[str]
+
+
+def _set_progress(**updates: Any) -> None:
+    _progress.update(updates)
+    _progress["updated_at"] = time.time()
 
 
 def _apply_log_level(level_str: str) -> None:
@@ -84,6 +102,63 @@ def _get_partition_label(dev: str) -> str:
     return os.path.basename(dev)
 
 
+def _flatten_lsblk_devices(devices: List[Dict[str, Any]], parent_usb: bool = False) -> List[Dict[str, Any]]:
+    flattened: List[Dict[str, Any]] = []
+    for dev in devices:
+        is_usb = parent_usb or dev.get("tran") == "usb" or dev.get("rm") is True or dev.get("rm") == 1
+        item = dict(dev)
+        item["_parent_usb"] = is_usb
+        flattened.append(item)
+        children = dev.get("children")
+        if isinstance(children, list):
+            flattened.extend(_flatten_lsblk_devices(children, is_usb))
+    return flattened
+
+
+def _discover_usb_partitions() -> List[UsbPartition]:
+    """Return removable USB filesystem partitions from lsblk metadata."""
+    try:
+        result = subprocess.run(
+            ["lsblk", "-J", "-o", "NAME,PATH,TYPE,TRAN,RM,FSTYPE,LABEL,MOUNTPOINTS"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception as e:
+        logger.warning("[mount-diag] lsblk discovery failed: %s", e)
+        return []
+    if result.returncode != 0:
+        logger.warning("[mount-diag] lsblk discovery failed rc=%d stderr=%r", result.returncode, result.stderr.strip())
+        return []
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        logger.warning("[mount-diag] Could not parse lsblk JSON: %s", e)
+        return []
+
+    blockdevices = data.get("blockdevices", [])
+    if not isinstance(blockdevices, list):
+        return []
+
+    partitions: List[UsbPartition] = []
+    for dev in _flatten_lsblk_devices(blockdevices):
+        if dev.get("type") not in ("part", "crypt"):
+            continue
+        if not dev.get("_parent_usb"):
+            continue
+        if not dev.get("fstype"):
+            continue
+        path = dev.get("path")
+        if not isinstance(path, str) or not path.startswith("/dev/"):
+            continue
+        raw_mounts = dev.get("mountpoints")
+        mountpoints = [m for m in raw_mounts if isinstance(m, str) and m] if isinstance(raw_mounts, list) else []
+        label = dev.get("label") if isinstance(dev.get("label"), str) and dev.get("label") else os.path.basename(path)
+        partitions.append(UsbPartition(path=path, label=label, mountpoints=mountpoints))
+    logger.warning("[mount-diag] lsblk USB partitions=%s", partitions)
+    return partitions
+
+
 def _mount_usb_devices() -> List[str]:
     """Mount any unmounted USB partitions via sudo mount.
 
@@ -103,9 +178,14 @@ def _mount_usb_devices() -> List[str]:
                    os.getuid(), os.geteuid(), os.environ.get("USER", "(unset)"))
 
     mounted = _get_mounted_devices()
-    partitions = sorted(glob.glob("/dev/sd[a-z]*[0-9]"))
-    logger.warning("[mount-diag] partitions=%s, already mounted sd*=%s",
-                   partitions, [d for d in mounted if d.startswith("/dev/sd")])
+    discovered = _discover_usb_partitions()
+    partition_paths = [p.path for p in discovered]
+    if discovered:
+        partitions = partition_paths
+    else:
+        partitions = sorted(glob.glob("/dev/sd[a-z]*[0-9]"))
+    logger.warning("[mount-diag] partitions=%s, already mounted removable=%s",
+                   partitions, [d for d in mounted if d in partitions])
 
     if not partitions:
         logger.warning("[mount-diag] No /dev/sd* partitions found — no USB drives to mount")
@@ -117,7 +197,8 @@ def _mount_usb_devices() -> List[str]:
             logger.warning("[mount-diag] Skipping %s — already mounted", dev)
             continue
 
-        label = _get_partition_label(dev)
+        discovered_part = next((p for p in discovered if p.path == dev), None)
+        label = discovered_part.label if discovered_part else _get_partition_label(dev)
         mount_point = f"/run/media/deck/{label}"
         logger.warning("[mount-diag] Mounting %s → %s (label=%r)", dev, mount_point, label)
 
@@ -152,7 +233,14 @@ def _list_mount_points() -> List[str]:
     We distinguish them by device: USB storage uses /dev/sd* while the SD card
     uses /dev/mmcblk*.  Only /dev/sd* entries are returned here.
     """
+    discovered = _discover_usb_partitions()
     mounts: List[str] = []
+    for partition in discovered:
+        mounts.extend(partition.mountpoints)
+    if mounts:
+        logger.debug("USB mount scan found %d lsblk mount(s): %s", len(mounts), mounts)
+    else:
+        logger.debug("No lsblk USB mounts found, falling back to /proc/mounts scan")
     try:
         with open("/proc/mounts", "r", encoding="utf-8") as f:
             for line in f:
@@ -256,8 +344,7 @@ def _copy_sync(zip_path: str, dest_root: str) -> str:
     logger.info("Copying '%s' → '%s' (%.1f MB)", src.name, dst, total / (1024 * 1024))
     copied = 0
     CHUNK = 1024 * 1024  # 1 MB
-    _progress["bytes_total"] = total
-    _progress["bytes_done"] = 0
+    _set_progress(bytes_total=total, bytes_done=0, current_file=src.name)
     with src.open("rb") as fsrc, dst.open("wb") as fdst:
         while True:
             chunk = fsrc.read(CHUNK)
@@ -266,8 +353,7 @@ def _copy_sync(zip_path: str, dest_root: str) -> str:
             fdst.write(chunk)
             copied += len(chunk)
             pct = int(copied / total * 100) if total > 0 else 0
-            _progress["percent"] = pct
-            _progress["bytes_done"] = copied
+            _set_progress(percent=pct, bytes_done=copied)
             logger.debug("Copy progress: %d%% (%d / %d bytes)", pct, copied, total)
     shutil.copystat(src, dst)
     logger.info("Copy complete: '%s'", dst)
@@ -285,6 +371,38 @@ async def _do_copy(zip_path: str, dest_root: str) -> None:
         _progress.update({"done": True, "error": str(e)})
 
 
+def _safe_extract_target(base_dir: Path, member_name: str) -> Path:
+    normalized = member_name.replace("\\", "/")
+    target = (base_dir / normalized).resolve()
+    base = base_dir.resolve()
+    if target != base and base not in target.parents:
+        raise RuntimeError(f"ZIP member escapes destination: {member_name}")
+    return target
+
+
+def _extract_member(zf: zipfile.ZipFile, member: zipfile.ZipInfo, base_dir: Path) -> int:
+    target = _safe_extract_target(base_dir, member.filename)
+    if member.is_dir():
+        target.mkdir(parents=True, exist_ok=True)
+        return 0
+    target.parent.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    with zf.open(member, "r") as src, target.open("wb") as dst:
+        while True:
+            chunk = src.read(1024 * 1024)
+            if not chunk:
+                break
+            dst.write(chunk)
+            copied += len(chunk)
+            yield copied
+    mode = (member.external_attr >> 16) & 0o777
+    if mode:
+        try:
+            target.chmod(mode)
+        except OSError:
+            logger.debug("Could not apply ZIP mode %o to %s", mode, target)
+
+
 def _extract_sync(zip_path: str, dest_root: str) -> str:
     global _progress
     zip_p = Path(zip_path).expanduser()
@@ -296,8 +414,7 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
         members = zf.infolist()
         total_bytes = max(sum(m.file_size for m in members), 1)
         logger.debug("ZIP has %d members, %d uncompressed bytes", len(members), total_bytes)
-        _progress["bytes_total"] = total_bytes
-        _progress["bytes_done"] = 0
+        _set_progress(bytes_total=total_bytes, bytes_done=0, current_file="")
         extracted_bytes = 0
 
         if top_folder:
@@ -310,11 +427,14 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
                     f"Folder '{top_folder}' already exists at destination: {game_dir}"
                 )
             for member in members:
-                zf.extract(member, dest_p)
+                _set_progress(current_file=member.filename)
+                member_done = 0
+                for member_done in _extract_member(zf, member, dest_p):
+                    pct = int((extracted_bytes + member_done) / total_bytes * 100)
+                    _set_progress(percent=pct, bytes_done=extracted_bytes + member_done)
                 extracted_bytes += member.file_size
                 pct = int(extracted_bytes / total_bytes * 100)
-                _progress["percent"] = pct
-                _progress["bytes_done"] = extracted_bytes
+                _set_progress(percent=pct, bytes_done=extracted_bytes)
                 logger.debug("Extract progress: %d%% (%d / %d bytes, %s)", pct, extracted_bytes, total_bytes, member.filename)
         else:
             # Case B: flat ZIP. Create a folder named after the ZIP file.
@@ -328,11 +448,14 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
                 )
             game_dir.mkdir(parents=True)
             for member in members:
-                zf.extract(member, game_dir)
+                _set_progress(current_file=member.filename)
+                member_done = 0
+                for member_done in _extract_member(zf, member, game_dir):
+                    pct = int((extracted_bytes + member_done) / total_bytes * 100)
+                    _set_progress(percent=pct, bytes_done=extracted_bytes + member_done)
                 extracted_bytes += member.file_size
                 pct = int(extracted_bytes / total_bytes * 100)
-                _progress["percent"] = pct
-                _progress["bytes_done"] = extracted_bytes
+                _set_progress(percent=pct, bytes_done=extracted_bytes)
                 logger.debug("Extract progress: %d%% (%d / %d bytes, %s)", pct, extracted_bytes, total_bytes, member.filename)
 
     logger.info("Extraction complete, game_dir=%s", game_dir)
@@ -354,12 +477,49 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
 async def _do_extract(zip_path: str, dest_root: str) -> None:
     global _progress
     try:
-        game_dir = await asyncio.to_thread(_extract_sync, zip_path, dest_root)
-        _progress.update({"percent": 100, "done": True, "result": {"game_dir": game_dir}})
+        game_dir = await asyncio.wait_for(
+            asyncio.to_thread(_extract_sync, zip_path, dest_root),
+            timeout=_EXTRACT_TIMEOUT_SECONDS,
+        )
+        _progress.update({"percent": 100, "done": True, "result": {"game_dir": game_dir}, "updated_at": time.time()})
         logger.info("Extract task finished: game_dir=%s", game_dir)
+    except asyncio.TimeoutError:
+        message = f"Extraction timed out after {_EXTRACT_TIMEOUT_SECONDS} seconds"
+        logger.exception(message)
+        _progress.update({"done": True, "error": message, "updated_at": time.time()})
     except Exception as e:
         logger.exception("Extract failed: %s", e)
-        _progress.update({"done": True, "error": str(e)})
+        _progress.update({"done": True, "error": str(e), "updated_at": time.time()})
+
+
+def _list_save_folders(save_root: Path) -> List[str]:
+    if not save_root.exists() or not save_root.is_dir():
+        raise RuntimeError(f"Save root does not exist or is not a directory: {save_root}")
+    folders = [str(p) for p in sorted(save_root.iterdir(), key=lambda p: p.name.lower()) if p.is_dir()]
+    return folders
+
+
+def _create_save_symlink(game_dir: Path, save_folder: Path) -> Dict[str, Any]:
+    game_subdir = game_dir / "game"
+    if not game_subdir.exists() or not game_subdir.is_dir():
+        return {"created": False, "skipped": True, "reason": "No game folder found."}
+    if not save_folder.exists() or not save_folder.is_dir():
+        raise RuntimeError(f"Save folder does not exist or is not a directory: {save_folder}")
+    saves_path = game_subdir / "saves"
+    if saves_path.exists() or saves_path.is_symlink():
+        return {"created": False, "skipped": True, "reason": "game/saves already exists."}
+    saves_path.symlink_to(save_folder, target_is_directory=True)
+    return {"created": True, "skipped": False, "path": str(saves_path), "target": str(save_folder)}
+
+
+def _can_link_saves(game_dir: Path) -> Dict[str, Any]:
+    game_subdir = game_dir / "game"
+    saves_path = game_subdir / "saves"
+    if not game_subdir.exists() or not game_subdir.is_dir():
+        return {"available": False, "reason": "No game folder found."}
+    if saves_path.exists() or saves_path.is_symlink():
+        return {"available": False, "reason": "game/saves already exists."}
+    return {"available": True, "reason": ""}
 
 
 class Plugin:
@@ -373,7 +533,7 @@ class Plugin:
         if not isinstance(data, dict):
             data = {}
         # Ensure individually-set keys are included even if read() returns stale data
-        for key in ("log_level", "sd_card_path", "default_dest_root"):
+        for key in ("log_level", "sd_card_path", "default_dest_root", "save_root_path"):
             val = settings.getSetting(key, None)
             if val is not None:
                 data[key] = val
@@ -448,6 +608,8 @@ class Plugin:
             "percent": 0,
             "bytes_done": 0,
             "bytes_total": 0,
+            "current_file": "",
+            "updated_at": time.time(),
             "done": False,
             "error": None,
             "result": None,
@@ -468,6 +630,8 @@ class Plugin:
             "percent": 0,
             "bytes_done": 0,
             "bytes_total": 0,
+            "current_file": "",
+            "updated_at": time.time(),
             "done": False,
             "error": None,
             "result": None,
@@ -504,6 +668,18 @@ class Plugin:
         except Exception as e:
             logger.warning("Failed to chmod '%s': %s", p, e)
         return {"path": str(p)}
+
+    async def list_save_folders(self, save_root: str) -> List[str]:
+        logger.info("Listing save folders in: %s", save_root)
+        return _list_save_folders(Path(save_root).expanduser())
+
+    async def create_save_symlink(self, game_dir: str, save_folder: str) -> Dict[str, Any]:
+        logger.info("Creating save symlink for game_dir=%s save_folder=%s", game_dir, save_folder)
+        return _create_save_symlink(Path(game_dir).expanduser(), Path(save_folder).expanduser())
+
+    async def can_link_saves(self, game_dir: str) -> Dict[str, Any]:
+        logger.info("Checking save symlink availability for game_dir=%s", game_dir)
+        return _can_link_saves(Path(game_dir).expanduser())
 
     # --- Lifecycle ---
 

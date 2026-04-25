@@ -14,6 +14,7 @@ import {
 } from "@decky/ui";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { FaDownload } from "react-icons/fa";
+import { basename, formatEta, formatSpeed } from "./pathUtils";
 
 // --- Error Boundary (debug: catches render errors so they don't crash Decky) ---
 
@@ -84,6 +85,7 @@ type Step =
   | "copying"
   | "extracting"
   | "launcher_pick"
+  | "save_link"
   | "complete"
   | "error";
 
@@ -92,6 +94,8 @@ type ProgressResult = {
   percent: number;
   bytes_done: number;
   bytes_total: number;
+  current_file?: string;
+  updated_at?: number;
   done: boolean;
   error: string | null;
   result: Record<string, string> | null;
@@ -100,6 +104,19 @@ type ProgressResult = {
 type LaunchersResult = {
   launchers: string[];
   type: "sh" | "exe" | null;
+};
+
+type CanLinkSavesResult = {
+  available: boolean;
+  reason: string;
+};
+
+type CreateSaveSymlinkResult = {
+  created: boolean;
+  skipped: boolean;
+  reason?: string;
+  path?: string;
+  target?: string;
 };
 
 // --- Backend API wrappers ---
@@ -139,6 +156,21 @@ async function getLaunchers(game_dir: string): Promise<LaunchersResult> {
 
 async function ensureExecutable(launcher_path: string): Promise<void> {
   await call<[string]>("ensure_executable", launcher_path);
+}
+
+async function listSaveFolders(save_root: string): Promise<string[]> {
+  return call<[string], string[]>("list_save_folders", save_root);
+}
+
+async function createSaveSymlink(
+  game_dir: string,
+  save_folder: string
+): Promise<CreateSaveSymlinkResult> {
+  return call<[string, string], CreateSaveSymlinkResult>("create_save_symlink", game_dir, save_folder);
+}
+
+async function canLinkSaves(game_dir: string): Promise<CanLinkSavesResult> {
+  return call<[string], CanLinkSavesResult>("can_link_saves", game_dir);
 }
 
 async function loadSettings(): Promise<Record<string, unknown>> {
@@ -198,33 +230,9 @@ function restartSteam(): void {
   }
 }
 
-function basename(p: string): string {
-  return p.replace(/\\/g, "/").split("/").pop() ?? p;
-}
-
-function formatEta(pct: number, startMs: number): string {
-  if (pct <= 0) return "Calculating…";
-  const elapsed = Date.now() - startMs;
-  if (elapsed < 1500) return "Calculating…";
-  const totalEst = elapsed / (pct / 100);
-  const remainingMs = Math.max(0, totalEst - elapsed);
-  if (remainingMs < 5000) return "< 5s remaining";
-  const secs = Math.round(remainingMs / 1000);
-  if (secs < 60) return `~${secs}s remaining`;
-  const mins = Math.floor(secs / 60);
-  const s = secs % 60;
-  return s > 0 ? `~${mins}m ${s}s remaining` : `~${mins}m remaining`;
-}
-
-function formatSpeed(bytesPerSec: number): string {
-  if (bytesPerSec <= 0) return "";
-  if (bytesPerSec >= 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
-  return `${(bytesPerSec / 1024).toFixed(0)} KB/s`;
-}
-
 // --- Plugin ---
 
-export default definePlugin((_serverAPI) => {
+export default definePlugin(() => {
   const Content: React.FC = () => {
     const [step, setStep] = useState<Step>("browse");
     const [progress, setProgress] = useState(0);
@@ -235,6 +243,10 @@ export default definePlugin((_serverAPI) => {
     const [completedGameName, setCompletedGameName] = useState("");
     const [errorMsg, setErrorMsg] = useState("");
     const [destRoot, setDestRoot] = useState("/run/media/mmcblk0p1/Games");
+    const [saveRoot, setSaveRoot] = useState("");
+    const [saveFolders, setSaveFolders] = useState<string[]>([]);
+    const [saveGameDir, setSaveGameDir] = useState("");
+    const [saveLinkStatus, setSaveLinkStatus] = useState("");
     const [usbMounts, setUsbMounts] = useState<string[]>([]);
     const [usbPath, setUsbPath] = useState("");
     const [zipFiles, setZipFiles] = useState<string[]>([]);
@@ -340,6 +352,10 @@ export default definePlugin((_serverAPI) => {
             setDestRoot(s.default_dest_root);
             log("debug", "Loaded default_dest_root from settings:", s.default_dest_root);
           }
+          if (typeof s?.save_root_path === "string" && s.save_root_path.length > 0) {
+            setSaveRoot(s.save_root_path);
+            log("debug", "Loaded save_root_path from settings:", s.save_root_path);
+          }
         } catch (e) {
           log("warn", "Failed to load settings:", e);
         }
@@ -428,6 +444,31 @@ export default definePlugin((_serverAPI) => {
       }
     };
 
+    const refreshUsbMounts = async () => {
+      log("info", "Refreshing USB mounts");
+      setSettingsBusy(true);
+      setSettingsStatus("Refreshing USB mounts...");
+      try {
+        const newlyMounted = await mountUsbDevices();
+        const mounts = await listUsbMounts();
+        setUsbMounts(mounts);
+        if (!usbPath && mounts.length > 0) {
+          setUsbPath(mounts[0]);
+        }
+        setMountStatus(
+          newlyMounted.length > 0
+            ? `Auto-mounted: ${newlyMounted.join(", ")}`
+            : "No unmounted USB partitions found.",
+        );
+        setSettingsStatus(`Found ${mounts.length} USB mount(s).`);
+      } catch (e) {
+        log("error", "refreshUsbMounts failed:", e);
+        setSettingsStatus(`Mount error: ${String(e)}`);
+      } finally {
+        setSettingsBusy(false);
+      }
+    };
+
     const handleSaveSdPath = async () => {
       if (!destRoot.trim()) {
         log("warn", "handleSaveSdPath called with empty destRoot");
@@ -480,6 +521,36 @@ export default definePlugin((_serverAPI) => {
       }
     };
 
+    const handleBrowseSaveRoot = async () => {
+      log("info", "Opening file picker for save root folder");
+      try {
+        const res = await openFilePicker(
+          FileSelectionType.FOLDER,
+          saveRoot.trim() || "/home/deck/",
+          false,
+          true,
+        );
+        log("info", "Save root folder selected:", res.realpath);
+        setSaveRoot(res.realpath);
+      } catch (e) {
+        log("warn", "Save root picker cancelled or failed:", e);
+      }
+    };
+
+    const handleSaveSaveRoot = async () => {
+      log("info", "Saving save root path:", saveRoot);
+      setSettingsBusy(true);
+      try {
+        await saveSetting("save_root_path", saveRoot.trim());
+        setSettingsStatus(saveRoot.trim() ? "Save root path saved." : "Save root path cleared.");
+      } catch (e) {
+        log("error", "saveSetting(save_root_path) failed:", e);
+        setSettingsStatus(`Error: ${String(e)}`);
+      } finally {
+        setSettingsBusy(false);
+      }
+    };
+
     const handleLogLevelChange = async (option: SingleDropdownOption) => {
       const level = option.data as LogLevel;
       _logLevel = level;
@@ -494,6 +565,38 @@ export default definePlugin((_serverAPI) => {
     };
 
     // --- Installation flow ---
+
+    const offerSaveLinkOrComplete = async (gameDir: string, gameName: string) => {
+      if (!saveRoot.trim()) {
+        setStep("complete");
+        return;
+      }
+      try {
+        const availability = await canLinkSaves(gameDir);
+        if (!availability.available) {
+          log("info", "Save link skipped:", availability.reason);
+          setSaveLinkStatus(availability.reason);
+          setStep("complete");
+          return;
+        }
+        const folders = await listSaveFolders(saveRoot);
+        if (folders.length === 0) {
+          log("info", "Save root has no folders:", saveRoot);
+          setSaveLinkStatus("No save folders found.");
+          setStep("complete");
+          return;
+        }
+        setSaveGameDir(gameDir);
+        setSaveFolders(folders);
+        setSaveLinkStatus("");
+        setCompletedGameName(gameName);
+        setStep("save_link");
+      } catch (e) {
+        log("warn", "Save link offer failed; continuing to completion:", e);
+        setSaveLinkStatus(String(e));
+        setStep("complete");
+      }
+    };
 
     const finishInstall = async (
       gameDir: string,
@@ -513,8 +616,30 @@ export default definePlugin((_serverAPI) => {
         specifyCompatTool(addResult.appId, "proton_experimental");
       }
       setCompletedGameName(gameName);
-      setStep("complete");
       log("info", "Installation complete for:", gameName);
+      await offerSaveLinkOrComplete(gameDir, gameName);
+    };
+
+    const handleSaveFolderPick = async (saveFolder: string) => {
+      try {
+        const result = await createSaveSymlink(saveGameDir, saveFolder);
+        if (result.created) {
+          setSaveLinkStatus(`Linked saves to ${basename(saveFolder)}.`);
+        } else if (result.skipped) {
+          setSaveLinkStatus(result.reason ?? "Save linking skipped.");
+        }
+        setStep("complete");
+      } catch (e) {
+        log("error", "createSaveSymlink failed:", e);
+        setErrorMsg(String(e));
+        setStep("error");
+      }
+    };
+
+    const handleSkipSaveLink = () => {
+      log("info", "User skipped save linking");
+      setSaveLinkStatus("Save linking skipped.");
+      setStep("complete");
     };
 
     const handleLauncherPick = async (launcherPath: string) => {
@@ -597,6 +722,9 @@ export default definePlugin((_serverAPI) => {
       setLaunchers([]);
       setErrorMsg("");
       setCompletedGameName("");
+      setSaveFolders([]);
+      setSaveGameDir("");
+      setSaveLinkStatus("");
     };
 
     const handleFinish = () => {
@@ -665,6 +793,30 @@ export default definePlugin((_serverAPI) => {
       );
     }
 
+    if (step === "save_link") {
+      return (
+        <PanelSection title="Link Saves">
+          <PanelSectionRow>
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              Choose a save folder to link for "{completedGameName}".
+            </div>
+          </PanelSectionRow>
+          {saveFolders.map((p) => (
+            <PanelSectionRow key={p}>
+              <ButtonItem layout="below" onClick={() => handleSaveFolderPick(p)}>
+                {basename(p)}
+              </ButtonItem>
+            </PanelSectionRow>
+          ))}
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={handleSkipSaveLink}>
+              Skip save link
+            </ButtonItem>
+          </PanelSectionRow>
+        </PanelSection>
+      );
+    }
+
     if (step === "complete") {
       return (
         <PanelSection title="Renpy ZIP Installer">
@@ -674,6 +826,11 @@ export default definePlugin((_serverAPI) => {
               so it appears in your library.
             </div>
           </PanelSectionRow>
+          {saveLinkStatus ? (
+            <PanelSectionRow>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>{saveLinkStatus}</div>
+            </PanelSectionRow>
+          ) : null}
           <PanelSectionRow>
             <ButtonItem layout="below" onClick={handleInstallAnother}>
               Install another game
@@ -741,6 +898,46 @@ export default definePlugin((_serverAPI) => {
             disabled={settingsBusy}
           >
             Browse for USB folder…
+          </ButtonItem>
+        </PanelSectionRow>
+
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={refreshUsbMounts}
+            disabled={settingsBusy}
+          >
+            Refresh USB mounts
+          </ButtonItem>
+        </PanelSectionRow>
+
+        <PanelSectionRow>
+          <TextField
+            label="Save root folder"
+            description="Optional folder containing per-game save folders."
+            value={saveRoot}
+            onChange={(e) => setSaveRoot(e.target.value)}
+            disabled={settingsBusy}
+          />
+        </PanelSectionRow>
+
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={handleBrowseSaveRoot}
+            disabled={settingsBusy}
+          >
+            Browse for save root folder...
+          </ButtonItem>
+        </PanelSectionRow>
+
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={handleSaveSaveRoot}
+            disabled={settingsBusy}
+          >
+            Save save root path
           </ButtonItem>
         </PanelSectionRow>
 
@@ -860,6 +1057,7 @@ export default definePlugin((_serverAPI) => {
   };
 
   return {
+    name: "Renpy Installer",
     content: (
       <ErrorBoundary>
         <Content />

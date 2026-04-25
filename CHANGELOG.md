@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.36] - 2026-04-25
+
+### Added
+- Optional save-link flow: configure a save root folder, choose a per-game save
+  folder after Steam shortcut creation, and create `game/saves` as a symlink
+  when the extracted game supports it.
+- Off-device test support with Vitest frontend tests and pytest backend tests,
+  wired into `pnpm test`.
+- Manual USB remount/refresh action in the plugin UI.
+
+### Fixed
+- USB discovery now uses block-device metadata to identify removable USB
+  filesystem partitions instead of relying only on `/dev/sd*` path patterns.
+- Extraction progress now updates while large ZIP members are being written and
+  reports extraction errors instead of leaving the UI indefinitely on
+  "Calculating...".
+- Failed extraction leaves the copied ZIP in place for debugging or retry.
+
 ## [0.0.33] - 2026-03-15
 
 ### Security

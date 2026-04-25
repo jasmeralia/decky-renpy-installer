@@ -1,6 +1,6 @@
 {
   "name": "renpy-installer",
-  "version": "0.0.35",
+  "version": "0.0.36",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,9 @@
     "build:zip": "pnpm run build && rm -rf /tmp/decky-pkg && mkdir -p /tmp/decky-pkg/decky-renpy-installer/dist && cp plugin.json main.py package.json /tmp/decky-pkg/decky-renpy-installer/ && cp dist/index.js /tmp/decky-pkg/decky-renpy-installer/dist/ && cd /tmp/decky-pkg && VERSION=$(node -p \"require('$OLDPWD/package.json').version\") && zip -r \"$OLDPWD/decky-renpy-installer-$VERSION.zip\" decky-renpy-installer/",
     "watch": "rollup -c -w",
     "lint": "eslint .",
+    "test": "pnpm run test:frontend && pnpm run test:backend",
+    "test:frontend": "vitest run",
+    "test:backend": "python -m venv .venv-test && .venv-test/bin/python -m pip install -q -r requirements-dev.txt && .venv-test/bin/python -m pytest tests/backend",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -36,6 +39,7 @@
     "rollup-plugin-esbuild": "^6.1.1",
     "rollup-plugin-external-globals": "^0.13.0",
     "typescript": "^5.5.4",
-    "typescript-eslint": "^8.0.0"
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.1.5"
   }
 }
