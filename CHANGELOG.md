@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.37] - 2026-04-25
+
+### Added
+- Dependabot configuration for pnpm/npm dependencies, Python test
+  dependencies, and GitHub Actions updates.
+
 ## [0.0.36] - 2026-04-25
 
 ### Added
