@@ -128,6 +128,6 @@ the plugin zip and creates a draft GitHub release automatically.
 `.github/workflows/release.yml` — triggers on `v*.*.*` tag push:
 - Installs deps, runs lint, builds the plugin
 - Packages `plugin.json main.py dist/index.js package.json` into `decky-renpy-installer.zip`
-- Deletes all previous draft releases (and their tags)
 - Creates a new draft release with the zip attached
+- Preserves previous releases and tags; do not delete old drafts automatically
 - Changelog in the release covers commits since the last **published** (non-draft) release

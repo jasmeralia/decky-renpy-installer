@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.40] - 2026-04-27
+
+### Fixed
+- Release workflow no longer deletes previous draft releases or their tags
+  when creating a new draft release.
+
 ## [0.0.39] - 2026-04-27
 
 ### Fixed

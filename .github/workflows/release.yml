@@ -71,19 +71,6 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Delete previous draft releases
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          current="${{ steps.tag.outputs.name }}"
-          gh release list --json isDraft,tagName \
-            --jq '.[] | select(.isDraft) | .tagName' \
-          | while read -r draft_tag; do
-              if [ "$draft_tag" != "$current" ]; then
-                gh release delete "$draft_tag" --yes --cleanup-tag 2>/dev/null || true
-              fi
-            done
-
       - name: Create draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
