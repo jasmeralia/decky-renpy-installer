@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.38] - 2026-04-27
+
+### Fixed
+- Extraction now adds executable permissions to every regular file in the
+  extracted game folder, covering Ren'Py launch scripts and bundled runtime
+  binaries that arrive without execute bits.
+
 ## [0.0.37] - 2026-04-25
 
 ### Added

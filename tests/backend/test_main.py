@@ -38,6 +38,14 @@ def make_zip(path: Path, entries: dict[str, bytes]) -> None:
             zf.writestr(name, content)
 
 
+def make_zip_with_modes(path: Path, entries: dict[str, tuple[bytes, int]]) -> None:
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, (content, mode) in entries.items():
+            info = zipfile.ZipInfo(name)
+            info.external_attr = mode << 16
+            zf.writestr(info, content)
+
+
 def test_zip_top_folder_detects_single_folder(tmp_path: Path):
     main = load_main()
     zip_path = tmp_path / "game.zip"
@@ -59,6 +67,60 @@ def test_extract_flat_zip_creates_folder_and_deletes_zip(tmp_path: Path):
     assert (game_dir / "game" / "script.rpy").read_bytes() == b"data"
     assert (game_dir / "launcher.sh").exists()
     assert not zip_path.exists()
+
+
+def test_extract_makes_all_regular_files_executable(tmp_path: Path):
+    main = load_main()
+    zip_path = tmp_path / "ProjektPassion-0.17-pc.zip"
+    make_zip(
+        zip_path,
+        {
+            "ProjektPassion-0.17-pc/ProjektPassion.sh": b"#!/bin/sh\n",
+            "ProjektPassion-0.17-pc/libpy2-linux-x86_64/ProjektPassion": b"binary",
+            "ProjektPassion-0.17-pc/game/script.rpy": b"data",
+        },
+    )
+    dest_root = tmp_path / "dest"
+    dest_root.mkdir()
+
+    game_dir = Path(main._extract_sync(str(zip_path), str(dest_root)))
+
+    assert (game_dir / "ProjektPassion.sh").stat().st_mode & 0o111
+    assert (game_dir / "libpy2-linux-x86_64" / "ProjektPassion").stat().st_mode & 0o111
+    assert (game_dir / "game" / "script.rpy").stat().st_mode & 0o111
+
+
+def test_extract_preserves_existing_mode_bits_when_adding_executable(tmp_path: Path):
+    main = load_main()
+    zip_path = tmp_path / "Game.zip"
+    make_zip_with_modes(
+        zip_path,
+        {
+            "Game/run.sh": (b"#!/bin/sh\n", 0o640),
+            "Game/already-executable": (b"binary", 0o755),
+        },
+    )
+    dest_root = tmp_path / "dest"
+    dest_root.mkdir()
+
+    game_dir = Path(main._extract_sync(str(zip_path), str(dest_root)))
+
+    assert (game_dir / "run.sh").stat().st_mode & 0o777 == 0o751
+    assert (game_dir / "already-executable").stat().st_mode & 0o777 == 0o755
+
+
+def test_executable_tree_skips_symlinks(tmp_path: Path):
+    main = load_main()
+    game_dir = tmp_path / "Game"
+    target = tmp_path / "outside"
+    game_dir.mkdir()
+    target.write_text("outside")
+    (game_dir / "outside-link").symlink_to(target)
+
+    changed = main._ensure_executable_tree(game_dir)
+
+    assert changed == 0
+    assert target.stat().st_mode & 0o111 == 0
 
 
 def test_extract_existing_folder_errors_and_keeps_zip(tmp_path: Path):

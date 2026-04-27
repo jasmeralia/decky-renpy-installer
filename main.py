@@ -403,6 +403,25 @@ def _extract_member(zf: zipfile.ZipFile, member: zipfile.ZipInfo, base_dir: Path
             logger.debug("Could not apply ZIP mode %o to %s", mode, target)
 
 
+def _ensure_executable_tree(game_dir: Path) -> int:
+    changed = 0
+    for path in sorted(game_dir.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            old_mode = path.stat().st_mode
+            new_mode = old_mode | 0o111
+            if new_mode == old_mode:
+                continue
+            path.chmod(new_mode)
+            changed += 1
+            logger.info("Set executable bit on extracted file '%s' (was %o, now %o)", path, old_mode, new_mode)
+        except OSError as e:
+            logger.warning("Failed to chmod extracted file '%s': %s", path, e)
+    logger.info("Executable permission pass complete for %s: %d file(s) updated", game_dir, changed)
+    return changed
+
+
 def _extract_sync(zip_path: str, dest_root: str) -> str:
     global _progress
     zip_p = Path(zip_path).expanduser()
@@ -459,6 +478,7 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
                 logger.debug("Extract progress: %d%% (%d / %d bytes, %s)", pct, extracted_bytes, total_bytes, member.filename)
 
     logger.info("Extraction complete, game_dir=%s", game_dir)
+    _ensure_executable_tree(game_dir)
 
     # Delete the ZIP from the SD card after successful extraction
     try:
