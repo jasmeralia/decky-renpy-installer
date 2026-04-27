@@ -408,6 +408,15 @@ def _ensure_executable_tree(game_dir: Path) -> int:
     for path in sorted(game_dir.rglob("*")):
         if path.is_symlink() or not path.is_file():
             continue
+        if path.suffix.lower() == ".sh":
+            try:
+                content = path.read_bytes()
+                normalized = content.replace(b"\r\n", b"\n")
+                if normalized != content:
+                    path.write_bytes(normalized)
+                    logger.info("Normalized CRLF line endings in shell script '%s'", path)
+            except OSError as e:
+                logger.warning("Failed to normalize shell script '%s': %s", path, e)
         try:
             old_mode = path.stat().st_mode
             new_mode = old_mode | 0o111

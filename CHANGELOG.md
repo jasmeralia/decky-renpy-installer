@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.39] - 2026-04-27
+
+### Fixed
+- Shell launch scripts extracted with Windows CRLF line endings are now
+  normalized to Unix LF endings before being added to Steam.
+
 ## [0.0.38] - 2026-04-27
 
 ### Fixed

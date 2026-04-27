@@ -90,6 +90,25 @@ def test_extract_makes_all_regular_files_executable(tmp_path: Path):
     assert (game_dir / "game" / "script.rpy").stat().st_mode & 0o111
 
 
+def test_extract_normalizes_crlf_shell_scripts_only(tmp_path: Path):
+    main = load_main()
+    zip_path = tmp_path / "Game.zip"
+    make_zip(
+        zip_path,
+        {
+            "Game/run.sh": b"#!/bin/sh\r\necho ok\r\n",
+            "Game/notes.txt": b"line 1\r\nline 2\r\n",
+        },
+    )
+    dest_root = tmp_path / "dest"
+    dest_root.mkdir()
+
+    game_dir = Path(main._extract_sync(str(zip_path), str(dest_root)))
+
+    assert (game_dir / "run.sh").read_bytes() == b"#!/bin/sh\necho ok\n"
+    assert (game_dir / "notes.txt").read_bytes() == b"line 1\r\nline 2\r\n"
+
+
 def test_extract_preserves_existing_mode_bits_when_adding_executable(tmp_path: Path):
     main = load_main()
     zip_path = tmp_path / "Game.zip"
