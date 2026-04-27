@@ -89,6 +89,7 @@ Current backend methods:
 - ensure_executable(launcher_path) — chmod +x
 - list_save_folders(save_root) — returns immediate subfolders under the configured save root
 - can_link_saves(game_dir) — returns whether `<game_dir>/game/saves` can be created safely
+- create_save_folder(save_root, folder_name) — creates an immediate child folder under the configured save root
 - create_save_symlink(game_dir, save_folder) — creates `<game_dir>/game/saves` symlink if absent
 - get_log_level() — returns current log level string ("debug"|"info"|"warn"|"error")
 - set_log_level(level) — sets log level in settings, applies immediately, returns bool

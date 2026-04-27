@@ -162,6 +162,10 @@ async function listSaveFolders(save_root: string): Promise<string[]> {
   return call<[string], string[]>("list_save_folders", save_root);
 }
 
+async function createSaveFolder(save_root: string, folder_name: string): Promise<string> {
+  return call<[string, string], string>("create_save_folder", save_root, folder_name);
+}
+
 async function createSaveSymlink(
   game_dir: string,
   save_folder: string
@@ -247,6 +251,7 @@ export default definePlugin(() => {
     const [saveFolders, setSaveFolders] = useState<string[]>([]);
     const [saveGameDir, setSaveGameDir] = useState("");
     const [saveLinkStatus, setSaveLinkStatus] = useState("");
+    const [newSaveFolderName, setNewSaveFolderName] = useState("");
     const [usbMounts, setUsbMounts] = useState<string[]>([]);
     const [usbPath, setUsbPath] = useState("");
     const [zipFiles, setZipFiles] = useState<string[]>([]);
@@ -583,11 +588,10 @@ export default definePlugin(() => {
         if (folders.length === 0) {
           log("info", "Save root has no folders:", saveRoot);
           setSaveLinkStatus("No save folders found.");
-          setStep("complete");
-          return;
         }
         setSaveGameDir(gameDir);
         setSaveFolders(folders);
+        setNewSaveFolderName("");
         setSaveLinkStatus("");
         setCompletedGameName(gameName);
         setStep("save_link");
@@ -633,6 +637,22 @@ export default definePlugin(() => {
         log("error", "createSaveSymlink failed:", e);
         setErrorMsg(String(e));
         setStep("error");
+      }
+    };
+
+    const handleCreateSaveFolder = async () => {
+      const folderName = newSaveFolderName.trim();
+      if (!folderName) {
+        setSaveLinkStatus("Enter a save folder name.");
+        return;
+      }
+      try {
+        const saveFolder = await createSaveFolder(saveRoot, folderName);
+        log("info", "Created save folder:", saveFolder);
+        await handleSaveFolderPick(saveFolder);
+      } catch (e) {
+        log("error", "createSaveFolder failed:", e);
+        setSaveLinkStatus(String(e));
       }
     };
 
@@ -808,6 +828,22 @@ export default definePlugin(() => {
               </ButtonItem>
             </PanelSectionRow>
           ))}
+          <PanelSectionRow>
+            <TextField
+              label="New save folder"
+              value={newSaveFolderName}
+              onChange={(e) => setNewSaveFolderName(e.target.value)}
+            />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={handleCreateSaveFolder}
+              disabled={!newSaveFolderName.trim()}
+            >
+              Create and link save folder
+            </ButtonItem>
+          </PanelSectionRow>
           <PanelSectionRow>
             <ButtonItem layout="below" onClick={handleSkipSaveLink}>
               Skip save link

@@ -187,6 +187,31 @@ def test_save_symlink_created_and_existing_saves_skipped(tmp_path: Path):
     assert skipped["skipped"] is True
 
 
+def test_create_save_folder_creates_immediate_child(tmp_path: Path):
+    main = load_main()
+    save_root = tmp_path / "Saves"
+    save_root.mkdir()
+
+    created = Path(main._create_save_folder(save_root, "New Game"))
+
+    assert created == save_root / "New Game"
+    assert created.is_dir()
+
+
+def test_create_save_folder_rejects_nested_or_invalid_names(tmp_path: Path):
+    main = load_main()
+    save_root = tmp_path / "Saves"
+    save_root.mkdir()
+
+    for folder_name in ("", ".", "..", "../Other", "Nested/Game", "Nested\\Game"):
+        try:
+            main._create_save_folder(save_root, folder_name)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError(f"expected RuntimeError for {folder_name!r}")
+
+
 def test_discover_usb_partitions_from_lsblk(monkeypatch):
     main = load_main()
     payload = {

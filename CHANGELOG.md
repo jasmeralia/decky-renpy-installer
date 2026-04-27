@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.41] - 2026-04-27
+
+### Added
+- Save-link flow can now create a new save folder under the configured save
+  root and immediately link `game/saves` to it.
+
 ## [0.0.40] - 2026-04-27
 
 ### Fixed

@@ -528,6 +528,27 @@ def _list_save_folders(save_root: Path) -> List[str]:
     return folders
 
 
+def _create_save_folder(save_root: Path, folder_name: str) -> str:
+    if not save_root.exists() or not save_root.is_dir():
+        raise RuntimeError(f"Save root does not exist or is not a directory: {save_root}")
+    name = folder_name.strip()
+    if not name or name in {".", ".."}:
+        raise RuntimeError("Save folder name is not valid.")
+    if "/" in name or "\\" in name:
+        raise RuntimeError("Save folder name must not contain path separators.")
+    folder = (save_root / name).resolve()
+    root = save_root.resolve()
+    if folder.parent != root:
+        raise RuntimeError("Save folder must be created directly under the save root.")
+    if folder.exists():
+        if folder.is_dir():
+            return str(folder)
+        raise RuntimeError(f"Save folder path exists but is not a directory: {folder}")
+    folder.mkdir()
+    logger.info("Created save folder: %s", folder)
+    return str(folder)
+
+
 def _create_save_symlink(game_dir: Path, save_folder: Path) -> Dict[str, Any]:
     game_subdir = game_dir / "game"
     if not game_subdir.exists() or not game_subdir.is_dir():
@@ -701,6 +722,10 @@ class Plugin:
     async def list_save_folders(self, save_root: str) -> List[str]:
         logger.info("Listing save folders in: %s", save_root)
         return _list_save_folders(Path(save_root).expanduser())
+
+    async def create_save_folder(self, save_root: str, folder_name: str) -> str:
+        logger.info("Creating save folder under save_root=%s folder_name=%s", save_root, folder_name)
+        return _create_save_folder(Path(save_root).expanduser(), folder_name)
 
     async def create_save_symlink(self, game_dir: str, save_folder: str) -> Dict[str, Any]:
         logger.info("Creating save symlink for game_dir=%s save_folder=%s", game_dir, save_folder)
