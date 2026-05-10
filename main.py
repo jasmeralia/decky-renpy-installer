@@ -160,30 +160,21 @@ def _discover_usb_partitions() -> List[UsbPartition]:
 
 
 def _mount_usb_devices() -> List[str]:
-    """Mount any unmounted USB partitions via sudo mount.
+    """Mount any unmounted USB partitions via udisksctl in the user session.
 
-    Scans /dev/sd* for partition block devices (e.g. /dev/sda1) that are not
-    yet present in /proc/mounts, then mounts each one under /run/media/deck/.
-
-    Uses ``sudo -n mount`` directly rather than udisksctl because Decky's
-    plugin_loader runs outside the desktop session, which prevents udisks2's
-    polkit authorization from succeeding.  The ``deck`` user on SteamOS has
-    passwordless sudo.
+    Uses ``systemd-run --user --pipe udisksctl mount`` so the command runs
+    inside the deck user's systemd session, where the polkit agent is registered
+    and can authorise the filesystem-mount action without a password prompt.
 
     Returns a list of mount paths for devices that were successfully mounted.
     """
-    # Use WARNING level for mount diagnostics so they always appear in logs
-    # regardless of the user's log level setting.
     logger.warning("[mount-diag] uid=%d euid=%d user=%s",
                    os.getuid(), os.geteuid(), os.environ.get("USER", "(unset)"))
 
     mounted = _get_mounted_devices()
     discovered = _discover_usb_partitions()
     partition_paths = [p.path for p in discovered]
-    if discovered:
-        partitions = partition_paths
-    else:
-        partitions = sorted(glob.glob("/dev/sd[a-z]*[0-9]"))
+    partitions = partition_paths if discovered else sorted(glob.glob("/dev/sd[a-z]*[0-9]"))
     logger.warning("[mount-diag] partitions=%s, already mounted removable=%s",
                    partitions, [d for d in mounted if d in partitions])
 
@@ -197,25 +188,46 @@ def _mount_usb_devices() -> List[str]:
             logger.warning("[mount-diag] Skipping %s — already mounted", dev)
             continue
 
-        discovered_part = next((p for p in discovered if p.path == dev), None)
-        label = discovered_part.label if discovered_part else _get_partition_label(dev)
-        mount_point = f"/run/media/deck/{label}"
-        logger.warning("[mount-diag] Mounting %s → %s (label=%r)", dev, mount_point, label)
-
+        logger.warning("[mount-diag] Mounting %s via udisksctl", dev)
         try:
-            # Create the mount point directory
-            subprocess.run(
-                ["sudo", "-n", "mkdir", "-p", mount_point],
-                capture_output=True, text=True, timeout=5,
-            )
+            # Build a clean env from the raw process environ (/proc/self/environ)
+            # rather than os.environ, because PyInstaller clears DBUS_SESSION_BUS_ADDRESS
+            # and XDG_RUNTIME_DIR from os.environ at startup.  We also drop
+            # LD_LIBRARY_PATH so systemd-run uses system libcrypto, not the
+            # bundled one that lacks OPENSSL_3.4.0.
+            try:
+                with open("/proc/self/environ", "rb") as _ef:
+                    raw_env = dict(
+                        item.split("=", 1)
+                        for item in _ef.read().decode(errors="replace").split("\x00")
+                        if "=" in item
+                    )
+            except Exception:
+                raw_env = dict(os.environ)
+            uid = os.getuid()
+            raw_env.pop("LD_LIBRARY_PATH", None)
+            raw_env.pop("LD_PRELOAD", None)
+            raw_env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+            raw_env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
             result = subprocess.run(
-                ["sudo", "-n", "mount", dev, mount_point],
+                [
+                    "systemd-run", "--user", "--pipe",
+                    "udisksctl", "mount", "--block-device", dev, "--no-user-interaction",
+                ],
                 capture_output=True, text=True, timeout=15,
+                env=raw_env,
             )
             logger.warning("[mount-diag] %s → rc=%d stdout=%r stderr=%r",
                            dev, result.returncode, result.stdout.strip(), result.stderr.strip())
             if result.returncode == 0:
-                newly_mounted.append(mount_point)
+                # stdout: "Mounted /dev/sda1 at /run/media/deck/LABEL"
+                match = re.search(r" at (/\S+)", result.stdout)
+                mount_path = match.group(1).rstrip(".") if match else None
+                if mount_path:
+                    newly_mounted.append(mount_path)
+                    logger.warning("[mount-diag] mounted %s → %s", dev, mount_path)
+                else:
+                    logger.warning("[mount-diag] could not parse mount path from: %r", result.stdout)
             else:
                 logger.warning("[mount-diag] mount failed for %s (rc=%d): %s",
                                dev, result.returncode, result.stderr.strip())
