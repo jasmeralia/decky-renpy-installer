@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.45] - 2026-05-09
+
+### Fixed
+- Read subprocess environment from `/proc/self/environ` instead of `os.environ` so that `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` (cleared by PyInstaller at startup) are present when invoking `systemd-run --user`.
+
+## [0.0.44] - 2026-05-09
+
+### Fixed
+- Strip `LD_LIBRARY_PATH` from the `systemd-run` subprocess environment so it uses system libs rather than the PyInstaller bundle's `libcrypto`, which lacks the `OPENSSL_3.4.0` symbol required by `libsystemd`.
+
+## [0.0.43] - 2026-05-09
+
+### Fixed
+- USB mount refresh now works without any sudoers entries. Replaced `sudo -n mount/mkdir` with `systemd-run --user udisksctl mount`, which runs inside the deck user's systemd session where the polkit agent can authorise the mount without a password prompt.
+
+## [0.0.42] - 2026-05-09
+
+### Security
+- Updated `pnpm.overrides` to force `flatted` ≥ 3.4.2 (fixes prototype pollution, GHSA-rf6f-7fwh-wjgh) and `picomatch` ≥ 4.0.4 (fixes ReDoS and glob-matching injection, GHSA-c2c7-rcm5-vvqj / GHSA-3v7f-55p6-f55p).
+
 ## [0.0.41] - 2026-04-27
 
 ### Added
