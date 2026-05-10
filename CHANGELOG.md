@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.42] - 2026-05-09
+
+### Security
+- Updated `pnpm.overrides` to force `flatted` ≥ 3.4.2 (fixes prototype pollution, GHSA-rf6f-7fwh-wjgh) and `picomatch` ≥ 4.0.4 (fixes ReDoS and glob-matching injection, GHSA-c2c7-rcm5-vvqj / GHSA-3v7f-55p6-f55p).
+
 ## [0.0.41] - 2026-04-27
 
 ### Added
