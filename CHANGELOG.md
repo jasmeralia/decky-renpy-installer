@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [0.0.46] - 2026-05-09
 
 ### Added
-- When a game folder already exists at the destination, the install flow now shows a conflict screen offering "Overwrite" (deletes the existing folder and proceeds) or "Cancel" (returns to the ZIP browser) instead of failing with an error. The conflict check happens before copying, so cancelling wastes no time.
+- When a game folder already exists at the destination, the install flow now shows a conflict screen offering "Overwrite" (extracts over the existing folder, replacing matching files and leaving others intact) or "Cancel" (returns to the ZIP browser) instead of failing with an error. The conflict check happens before copying, so cancelling wastes no time.
 
 ## [0.0.45] - 2026-05-09
 

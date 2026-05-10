@@ -462,14 +462,12 @@ def _extract_sync(zip_path: str, dest_root: str, overwrite: bool = False) -> str
             game_dir = dest_p / top_folder
             logger.info("Case A: extracting with top folder '%s' → %s", top_folder, game_dir)
             if game_dir.exists():
-                if overwrite:
-                    logger.info("Overwriting existing folder: %s", game_dir)
-                    shutil.rmtree(game_dir)
-                else:
+                if not overwrite:
                     logger.error("Destination folder already exists: %s", game_dir)
                     raise RuntimeError(
                         f"Folder '{top_folder}' already exists at destination: {game_dir}"
                     )
+                logger.info("Overwriting files in existing folder: %s", game_dir)
             for member in members:
                 _set_progress(current_file=member.filename)
                 member_done = 0
@@ -486,15 +484,13 @@ def _extract_sync(zip_path: str, dest_root: str, overwrite: bool = False) -> str
             game_dir = dest_p / folder_name
             logger.info("Case B: flat ZIP, creating folder '%s' → %s", folder_name, game_dir)
             if game_dir.exists():
-                if overwrite:
-                    logger.info("Overwriting existing folder: %s", game_dir)
-                    shutil.rmtree(game_dir)
-                else:
+                if not overwrite:
                     logger.error("Destination folder already exists: %s", game_dir)
                     raise RuntimeError(
                         f"Folder '{folder_name}' already exists at destination: {game_dir}"
                     )
-            game_dir.mkdir(parents=True)
+                logger.info("Overwriting files in existing folder: %s", game_dir)
+            game_dir.mkdir(parents=True, exist_ok=True)
             for member in members:
                 _set_progress(current_file=member.filename)
                 member_done = 0
