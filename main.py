@@ -443,7 +443,7 @@ def _ensure_executable_tree(game_dir: Path) -> int:
     return changed
 
 
-def _extract_sync(zip_path: str, dest_root: str) -> str:
+def _extract_sync(zip_path: str, dest_root: str, overwrite: bool = False, replace: bool = False) -> str:
     global _progress
     zip_p = Path(zip_path).expanduser()
     dest_p = Path(dest_root).expanduser()
@@ -462,10 +462,16 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
             game_dir = dest_p / top_folder
             logger.info("Case A: extracting with top folder '%s' → %s", top_folder, game_dir)
             if game_dir.exists():
-                logger.error("Destination folder already exists: %s", game_dir)
-                raise RuntimeError(
-                    f"Folder '{top_folder}' already exists at destination: {game_dir}"
-                )
+                if replace:
+                    logger.info("Deleting existing folder for clean reinstall: %s", game_dir)
+                    shutil.rmtree(game_dir)
+                elif not overwrite:
+                    logger.error("Destination folder already exists: %s", game_dir)
+                    raise RuntimeError(
+                        f"Folder '{top_folder}' already exists at destination: {game_dir}"
+                    )
+                else:
+                    logger.info("Overwriting files in existing folder: %s", game_dir)
             for member in members:
                 _set_progress(current_file=member.filename)
                 member_done = 0
@@ -482,11 +488,17 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
             game_dir = dest_p / folder_name
             logger.info("Case B: flat ZIP, creating folder '%s' → %s", folder_name, game_dir)
             if game_dir.exists():
-                logger.error("Destination folder already exists: %s", game_dir)
-                raise RuntimeError(
-                    f"Folder '{folder_name}' already exists at destination: {game_dir}"
-                )
-            game_dir.mkdir(parents=True)
+                if replace:
+                    logger.info("Deleting existing folder for clean reinstall: %s", game_dir)
+                    shutil.rmtree(game_dir)
+                elif not overwrite:
+                    logger.error("Destination folder already exists: %s", game_dir)
+                    raise RuntimeError(
+                        f"Folder '{folder_name}' already exists at destination: {game_dir}"
+                    )
+                else:
+                    logger.info("Overwriting files in existing folder: %s", game_dir)
+            game_dir.mkdir(parents=True, exist_ok=True)
             for member in members:
                 _set_progress(current_file=member.filename)
                 member_done = 0
@@ -515,11 +527,11 @@ def _extract_sync(zip_path: str, dest_root: str) -> str:
     return str(game_dir)
 
 
-async def _do_extract(zip_path: str, dest_root: str) -> None:
+async def _do_extract(zip_path: str, dest_root: str, overwrite: bool = False, replace: bool = False) -> None:
     global _progress
     try:
         game_dir = await asyncio.wait_for(
-            asyncio.to_thread(_extract_sync, zip_path, dest_root),
+            asyncio.to_thread(_extract_sync, zip_path, dest_root, overwrite, replace),
             timeout=_EXTRACT_TIMEOUT_SECONDS,
         )
         _progress.update({"percent": 100, "done": True, "result": {"game_dir": game_dir}, "updated_at": time.time()})
@@ -684,9 +696,18 @@ class Plugin:
 
     # --- Extract (SD card ZIP → game folder) ---
 
-    async def start_extract(self, zip_path: str, dest_root: str) -> Dict[str, Any]:
+    async def check_extract_conflict(self, zip_path: str, dest_root: str) -> Dict[str, Any]:
+        zip_p = Path(zip_path).expanduser()
+        dest_p = Path(dest_root).expanduser()
+        top_folder = _get_zip_top_folder(zip_p)
+        folder_name = top_folder if top_folder else _safe_folder_name(zip_p.name)
+        conflict = (dest_p / folder_name).exists()
+        logger.info("check_extract_conflict: folder=%s conflict=%s", folder_name, conflict)
+        return {"conflict": conflict, "folder_name": folder_name}
+
+    async def start_extract(self, zip_path: str, dest_root: str, overwrite: bool = False, replace: bool = False) -> Dict[str, Any]:
         global _progress, _active_task
-        logger.info("start_extract: zip_path=%s dest_root=%s", zip_path, dest_root)
+        logger.info("start_extract: zip_path=%s dest_root=%s overwrite=%s replace=%s", zip_path, dest_root, overwrite, replace)
         _progress = {
             "operation": "extract",
             "percent": 0,
@@ -701,7 +722,7 @@ class Plugin:
         if _active_task and not _active_task.done():
             logger.warning("Cancelling in-flight task before starting new extract")
             _active_task.cancel()
-        _active_task = asyncio.create_task(_do_extract(zip_path, dest_root))
+        _active_task = asyncio.create_task(_do_extract(zip_path, dest_root, overwrite, replace))
         return {"started": True}
 
     # --- Launcher discovery ---
