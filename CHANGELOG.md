@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.47] - 2026-05-09
+
+### Added
+- Conflict screen now offers three options: "Overwrite (update files in place)", "Delete and reinstall", and "Cancel".
+
 ## [0.0.46] - 2026-05-09
 
 ### Added

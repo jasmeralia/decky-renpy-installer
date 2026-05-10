@@ -149,8 +149,8 @@ async function checkExtractConflict(zip_path: string, dest_root: string): Promis
   return call<[string, string], ConflictResult>("check_extract_conflict", zip_path, dest_root);
 }
 
-async function startExtract(zip_path: string, dest_root: string, overwrite = false): Promise<void> {
-  await call<[string, string, boolean]>("start_extract", zip_path, dest_root, overwrite);
+async function startExtract(zip_path: string, dest_root: string, overwrite = false, replace = false): Promise<void> {
+  await call<[string, string, boolean, boolean]>("start_extract", zip_path, dest_root, overwrite, replace);
 }
 
 async function getProgress(): Promise<ProgressResult> {
@@ -683,7 +683,7 @@ export default definePlugin(() => {
       }
     };
 
-    const doInstall = async (usbZipPath: string, overwrite: boolean) => {
+    const doInstall = async (usbZipPath: string, overwrite: boolean, replace = false) => {
       try {
         operationStartTime.current = Date.now();
         setStep("copying");
@@ -699,8 +699,8 @@ export default definePlugin(() => {
         operationStartTime.current = Date.now();
         setStep("extracting");
         setProgress(0);
-        log("info", "Starting extract: %s → %s overwrite=%s", destZip, destRoot, overwrite);
-        await startExtract(destZip, destRoot, overwrite);
+        log("info", "Starting extract: %s → %s overwrite=%s replace=%s", destZip, destRoot, overwrite, replace);
+        await startExtract(destZip, destRoot, overwrite, replace);
         const extractResult = await waitForProgress((pct, bps) => { setProgress(pct); setSpeedBytesPerSec(bps); });
         if (extractResult.error) throw new Error(extractResult.error);
         const gameDir = extractResult.result!.game_dir;
@@ -757,7 +757,12 @@ export default definePlugin(() => {
 
     const handleOverwrite = () => {
       log("info", "User chose overwrite for:", conflictFolderName);
-      void doInstall(pendingUsbZipPath, true);
+      void doInstall(pendingUsbZipPath, true, false);
+    };
+
+    const handleReplace = () => {
+      log("info", "User chose delete-and-reinstall for:", conflictFolderName);
+      void doInstall(pendingUsbZipPath, false, true);
     };
 
     const handleConflictCancel = () => {
@@ -830,12 +835,17 @@ export default definePlugin(() => {
         <PanelSection title="Renpy ZIP Installer">
           <PanelSectionRow>
             <div style={{ fontSize: 12, opacity: 0.8 }}>
-              "{conflictFolderName}" already exists at the destination. Overwrite it?
+              "{conflictFolderName}" already exists at the destination.
             </div>
           </PanelSectionRow>
           <PanelSectionRow>
             <ButtonItem layout="below" onClick={handleOverwrite}>
-              Overwrite
+              Overwrite (update files in place)
+            </ButtonItem>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={handleReplace}>
+              Delete and reinstall
             </ButtonItem>
           </PanelSectionRow>
           <PanelSectionRow>
