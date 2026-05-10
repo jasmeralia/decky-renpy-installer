@@ -84,6 +84,7 @@ type Step =
   | "browse"
   | "copying"
   | "extracting"
+  | "conflict"
   | "launcher_pick"
   | "save_link"
   | "complete"
@@ -142,8 +143,14 @@ async function startCopy(zip_path: string, dest_root: string): Promise<void> {
   await call<[string, string]>("start_copy", zip_path, dest_root);
 }
 
-async function startExtract(zip_path: string, dest_root: string): Promise<void> {
-  await call<[string, string]>("start_extract", zip_path, dest_root);
+type ConflictResult = { conflict: boolean; folder_name: string };
+
+async function checkExtractConflict(zip_path: string, dest_root: string): Promise<ConflictResult> {
+  return call<[string, string], ConflictResult>("check_extract_conflict", zip_path, dest_root);
+}
+
+async function startExtract(zip_path: string, dest_root: string, overwrite = false): Promise<void> {
+  await call<[string, string, boolean]>("start_extract", zip_path, dest_root, overwrite);
 }
 
 async function getProgress(): Promise<ProgressResult> {
@@ -262,6 +269,8 @@ export default definePlugin(() => {
     const [logLevel, setLogLevel] = useState<LogLevel>("error");
 
     const [currentZipName, setCurrentZipName] = useState("");
+    const [conflictFolderName, setConflictFolderName] = useState("");
+    const [pendingUsbZipPath, setPendingUsbZipPath] = useState("");
     const [speedBytesPerSec, setSpeedBytesPerSec] = useState(0);
     const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const operationStartTime = useRef<number | null>(null);
@@ -674,18 +683,8 @@ export default definePlugin(() => {
       }
     };
 
-    const handleZipSelect = async (usbZipPath: string) => {
-      if (!destRoot.trim()) {
-        log("error", "handleZipSelect: destRoot is empty");
-        setErrorMsg("SD card destination path is not set.");
-        setStep("error");
-        return;
-      }
-      log("info", "handleZipSelect: zip=%s dest=%s", usbZipPath, destRoot);
-      setCurrentZipName(basename(usbZipPath));
-      setUsbSafeMsg(false);
+    const doInstall = async (usbZipPath: string, overwrite: boolean) => {
       try {
-        // Step 2: Copy ZIP from USB to SD card
         operationStartTime.current = Date.now();
         setStep("copying");
         setProgress(0);
@@ -696,19 +695,17 @@ export default definePlugin(() => {
         const destZip = copyResult.result!.dest_zip;
         log("info", "Copy finished, destZip:", destZip);
 
-        // Show "USB safe to remove" message and proceed to extraction
         setUsbSafeMsg(true);
         operationStartTime.current = Date.now();
         setStep("extracting");
         setProgress(0);
-        log("info", "Starting extract: %s → %s", destZip, destRoot);
-        await startExtract(destZip, destRoot);
+        log("info", "Starting extract: %s → %s overwrite=%s", destZip, destRoot, overwrite);
+        await startExtract(destZip, destRoot, overwrite);
         const extractResult = await waitForProgress((pct, bps) => { setProgress(pct); setSpeedBytesPerSec(bps); });
         if (extractResult.error) throw new Error(extractResult.error);
         const gameDir = extractResult.result!.game_dir;
         log("info", "Extract finished, gameDir:", gameDir);
 
-        // Step 5: Find launchers
         log("info", "Getting launchers for:", gameDir);
         const lr = await getLaunchers(gameDir);
         log("info", "getLaunchers result:", lr);
@@ -720,7 +717,6 @@ export default definePlugin(() => {
           await ensureExecutable(lr.launchers[0]);
           await finishInstall(gameDir, lr.launchers[0], lr.type);
         } else {
-          // Multiple launchers — let the user choose
           log("info", "Multiple launchers found (%d), presenting selection", lr.launchers.length);
           setPendingGameDir(gameDir);
           setLaunchers(lr.launchers);
@@ -728,10 +724,45 @@ export default definePlugin(() => {
           setStep("launcher_pick");
         }
       } catch (e) {
-        log("error", "handleZipSelect flow failed:", e);
+        log("error", "doInstall flow failed:", e);
         setErrorMsg(String(e));
         setStep("error");
       }
+    };
+
+    const handleZipSelect = async (usbZipPath: string) => {
+      if (!destRoot.trim()) {
+        log("error", "handleZipSelect: destRoot is empty");
+        setErrorMsg("SD card destination path is not set.");
+        setStep("error");
+        return;
+      }
+      log("info", "handleZipSelect: zip=%s dest=%s", usbZipPath, destRoot);
+      setCurrentZipName(basename(usbZipPath));
+      setUsbSafeMsg(false);
+      try {
+        const conflict = await checkExtractConflict(usbZipPath, destRoot);
+        if (conflict.conflict) {
+          log("info", "Destination folder already exists: %s", conflict.folder_name);
+          setConflictFolderName(conflict.folder_name);
+          setPendingUsbZipPath(usbZipPath);
+          setStep("conflict");
+          return;
+        }
+      } catch (e) {
+        log("warn", "checkExtractConflict failed (non-fatal), proceeding:", e);
+      }
+      await doInstall(usbZipPath, false);
+    };
+
+    const handleOverwrite = () => {
+      log("info", "User chose overwrite for:", conflictFolderName);
+      void doInstall(pendingUsbZipPath, true);
+    };
+
+    const handleConflictCancel = () => {
+      log("info", "User cancelled conflict, returning to browse");
+      setStep("browse");
     };
 
     const handleInstallAnother = () => {
@@ -789,6 +820,28 @@ export default definePlugin(() => {
                   ].filter(Boolean).join(" • ")
                 : ""}
             </div>
+          </PanelSectionRow>
+        </PanelSection>
+      );
+    }
+
+    if (step === "conflict") {
+      return (
+        <PanelSection title="Renpy ZIP Installer">
+          <PanelSectionRow>
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              "{conflictFolderName}" already exists at the destination. Overwrite it?
+            </div>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={handleOverwrite}>
+              Overwrite
+            </ButtonItem>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={handleConflictCancel}>
+              Cancel
+            </ButtonItem>
           </PanelSectionRow>
         </PanelSection>
       );
