@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.48] - 2026-06-14
+
+### Security
+- Override `esbuild` to `0.28.1` (patched for GHSA-gv7w-rqvm-qjhr; was `0.27.2` via `rollup-plugin-esbuild` and `vite`).
+
 ## [0.0.47] - 2026-05-09
 
 ### Added
