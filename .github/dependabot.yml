@@ -11,6 +11,10 @@ updates:
     frontend-dependencies:
       patterns:
       - '*'
+  ignore:
+  - dependency-name: typescript
+    update-types:
+    - version-update:semver-major
   reviewers:
   - jasmeralia
 - package-ecosystem: pip
