@@ -40,8 +40,8 @@
     "rollup": "^4.62.2",
     "rollup-plugin-esbuild": "^6.1.1",
     "rollup-plugin-external-globals": "^0.13.0",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.62.1",
-    "vitest": "^4.1.9"
+    "typescript": "^7.0.2",
+    "typescript-eslint": "^8.63.0",
+    "vitest": "^4.1.10"
   }
 }
