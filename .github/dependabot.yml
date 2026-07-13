@@ -15,8 +15,6 @@ updates:
   - dependency-name: typescript
     update-types:
     - version-update:semver-major
-  reviewers:
-  - jasmeralia
 - package-ecosystem: pip
   directory: /
   schedule:
@@ -28,8 +26,6 @@ updates:
     python-test-dependencies:
       patterns:
       - '*'
-  reviewers:
-  - jasmeralia
 - package-ecosystem: github-actions
   directory: /
   schedule:
@@ -41,5 +37,3 @@ updates:
     github-actions:
       patterns:
       - '*'
-  reviewers:
-  - jasmeralia
