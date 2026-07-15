@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@decky/api": "^1.1.3",
-    "@decky/ui": "^4.11.6",
+    "@decky/ui": "^4.12.0",
     "decky-frontend-lib": "^3.25.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
@@ -41,7 +41,7 @@
     "rollup-plugin-esbuild": "^6.1.1",
     "rollup-plugin-external-globals": "^0.13.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.63.0",
+    "typescript-eslint": "^8.64.0",
     "vitest": "^4.1.10"
   }
 }
