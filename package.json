@@ -1,6 +1,6 @@
 {
   "name": "renpy-installer",
-  "version": "0.0.49",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "test": "pnpm run test:frontend && pnpm run test:backend",
     "test:frontend": "vitest run",
-    "test:backend": "python -m venv .venv-test && .venv-test/bin/python -m pip install -q -r requirements-dev.txt && .venv-test/bin/python -m pytest tests/backend",
+    "test:backend": "python3 -m venv --clear .venv-test && .venv-test/bin/python -m pip install -q -r requirements-dev.txt && .venv-test/bin/python -m pytest tests/backend",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

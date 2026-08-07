@@ -1,13 +1,12 @@
 name: CI
 
+# Pull requests only. Pushes to master are handled by release.yml, which runs
+# the same lint/test/build gate before tagging and drafting a release.
 on:
   pull_request:
-  push:
-    branches:
-      - master
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
@@ -26,6 +25,10 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -34,6 +37,9 @@ jobs:
 
       - name: Lint
         run: pnpm run lint
+
+      - name: Test
+        run: pnpm test
 
       - name: Build
         run: pnpm run build
