@@ -1,24 +1,125 @@
-name: Draft Release
+name: Build & Draft Release
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Create tag and draft a release (master or an existing tag only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  resolve:
+    name: Resolve Release Info
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+    outputs:
+      is_release: ${{ steps.r.outputs.is_release }}
+      create_tag: ${{ steps.r.outputs.create_tag }}
+      tag_name: ${{ steps.r.outputs.tag_name }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Resolve release info
+        id: r
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DISPATCH_RELEASE: ${{ inputs.release }}
+        run: python3 scripts/release_info.py
+
+  lint-and-test:
+    name: Lint, Test & Build
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit
+        run: pnpm audit --audit-level=low
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm run build
+
+  create-tag:
+    name: Create Release Tag
+    if: needs.resolve.outputs.is_release == 'true'
+    needs: [resolve, lint-and-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.resolve.outputs.create_tag == 'true' && 'master' || format('refs/tags/{0}', needs.resolve.outputs.tag_name) }}
+
+      # Creating the tag with GITHUB_TOKEN deliberately does NOT re-trigger this
+      # workflow via its own `push: tags:` filter — the release job below runs in
+      # this same run and checks the tag out directly, so no PAT is required.
+      - name: Create or resolve tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ needs.resolve.outputs.create_tag }}" != "true" ]]; then
+            echo "Tag ${TAG_NAME} already exists; nothing to create."
+            exit 0
+          fi
+          gh api "repos/${{ github.repository }}/git/refs" \
+            --method POST \
+            --field "ref=refs/tags/${TAG_NAME}" \
+            --field "sha=$(git rev-parse HEAD)"
+
+  release:
+    name: Package & Draft Release
+    if: needs.resolve.outputs.is_release == 'true'
+    needs: [resolve, create-tag]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag_name }}
 
       - uses: pnpm/action-setup@v6
         with:
@@ -32,57 +133,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm run lint
+      # plugin.json/package.json carry a 0.0.0 placeholder in git; the shipped
+      # zip must carry the tag's version because Decky reads it from plugin.json.
+      - name: Stamp release version
+        run: node scripts/write_version.mjs --tag "${TAG_NAME}"
 
       - name: Build
         run: pnpm run build
 
       - name: Package zip
         run: |
+          version="${TAG_NAME#v}"
           mkdir -p /tmp/decky-pkg/decky-renpy-installer/dist
           cp plugin.json main.py package.json /tmp/decky-pkg/decky-renpy-installer/
           cp dist/index.js /tmp/decky-pkg/decky-renpy-installer/dist/
           cd /tmp/decky-pkg
-          version="${GITHUB_REF#refs/tags/v}"
           zip -r "$GITHUB_WORKSPACE/decky-renpy-installer-${version}.zip" decky-renpy-installer/
-
-      - name: Get current tag
-        id: tag
-        run: echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-
-      - name: Get last published release tag
-        id: last_release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          last=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // ""')
-          echo "tag=$last" >> "$GITHUB_OUTPUT"
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          current="${{ steps.tag.outputs.name }}"
-          last="${{ steps.last_release.outputs.tag }}"
-          if [ -n "$last" ]; then
-            notes=$(git log "${last}..${current}" --pretty=format:"- %s" --no-merges)
-          else
-            notes=$(git log "${current}" --pretty=format:"- %s" --no-merges)
-          fi
-          {
-            echo "notes<<EOF"
-            echo "$notes"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Create draft release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          version="${{ steps.tag.outputs.name }}"
-          version="${version#v}"
-          gh release create "${{ steps.tag.outputs.name }}" \
+          version="${TAG_NAME#v}"
+          gh release create "${TAG_NAME}" \
             "decky-renpy-installer-${version}.zip" \
-            --title "${{ steps.tag.outputs.name }}" \
-            --notes "${{ steps.changelog.outputs.notes }}" \
+            --title "${TAG_NAME}" \
+            --generate-notes \
             --draft
