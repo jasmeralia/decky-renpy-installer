@@ -7,6 +7,13 @@ number at merge time, in-flight changes go under `## [Unreleased]`.
 
 ## [Unreleased]
 
+### Added
+- CI now publishes frontend and backend coverage to Codecov as informational
+  reports while the combined baseline remains below 80%.
+
+### Security
+- Override transitive `nanoid` releases below 3.3.18 to the patched release.
+
 ### Changed
 - Releases are now cut automatically on every merge to `master` (including
   auto-merged Dependabot PRs) instead of requiring a hand-pushed tag. CI picks

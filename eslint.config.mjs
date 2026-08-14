@@ -2,7 +2,7 @@ import tseslint from "typescript-eslint";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["dist/**"] },
+  { ignores: ["dist/**", "coverage/**", ".venv-test/**"] },
   tseslint.configs.recommended,
   {
     files: ["**/*.ts", "**/*.tsx"],
