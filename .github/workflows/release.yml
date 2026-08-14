@@ -73,6 +73,13 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/frontend/cobertura-coverage.xml,coverage/backend.xml
+          fail_ci_if_error: false
+
       - name: Build
         run: pnpm run build
 

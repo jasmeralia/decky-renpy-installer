@@ -9,8 +9,8 @@
     "watch": "rollup -c -w",
     "lint": "eslint .",
     "test": "pnpm run test:frontend && pnpm run test:backend",
-    "test:frontend": "vitest run",
-    "test:backend": "python3 -m venv --clear .venv-test && .venv-test/bin/python -m pip install -q -r requirements-dev.txt && .venv-test/bin/python -m pytest tests/backend",
+    "test:frontend": "vitest run --coverage",
+    "test:backend": "python3 -m venv --clear .venv-test && .venv-test/bin/python -m pip install -q -r requirements-dev.txt && .venv-test/bin/python -m pytest tests/backend --cov=main --cov-report=term-missing --cov-report=xml:coverage/backend.xml",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -26,6 +26,7 @@
     "@rollup/plugin-replace": "^6.0.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^10.8.0",
     "globals": "^17.9.0",
     "react-icons": "^5.7.0",
