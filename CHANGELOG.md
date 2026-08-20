@@ -21,6 +21,8 @@ number at merge time, in-flight changes go under `## [Unreleased]`.
 ### Changed
 - SD card destination, save root, and log level now live in a dedicated Settings
   screen so the main installer view focuses on USB and ZIP selection.
+- Added frontend tests covering Settings screen navigation and browse/settings
+  status-message separation.
 - Releases are now cut automatically on every merge to `master` (including
   auto-merged Dependabot PRs) instead of requiring a hand-pushed tag. CI picks
   the next patch version, creates the tag, and drafts the release.

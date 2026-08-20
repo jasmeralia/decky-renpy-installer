@@ -415,6 +415,83 @@ describe("plugin definition and initial loading", () => {
   });
 });
 
+describe("settings screen", () => {
+  it("does not show moved configuration fields on the browse screen", async () => {
+    await renderSettled();
+
+    expect(screen.queryByLabelText("SD card destination")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Save root folder")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Log level")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+  });
+
+  it("returns to the browse screen from settings", async () => {
+    await renderSettled();
+    await openSettings();
+
+    await userEvent.click(screen.getByRole("button", { name: "Back to installer" }));
+
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByText(/USB mounts:/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back to installer" })).not.toBeInTheDocument();
+  });
+
+  it("shows a prompt when no SD destination is configured", async () => {
+    await renderSettled();
+    await openSettings();
+    await userEvent.clear(screen.getByLabelText("SD card destination"));
+
+    await userEvent.click(screen.getByRole("button", { name: "Back to installer" }));
+
+    expect(screen.getByText("Install to: (not set — open Settings)")).toBeInTheDocument();
+  });
+
+  it("keeps USB status messages on the browse screen", async () => {
+    await renderSettled();
+    mockRoute("mount_usb_devices", () => []);
+    mockRoute("list_usb_mounts", () => ["/usb/a", "/usb/b"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh USB mounts" }));
+    expect(await screen.findByText("Found 2 USB mount(s).")).toBeInTheDocument();
+
+    await openSettings();
+    expect(screen.queryByText("Found 2 USB mount(s).")).not.toBeInTheDocument();
+  });
+
+  it("keeps save confirmations on the settings screen", async () => {
+    await renderSettled();
+    await openSettings();
+    await userEvent.clear(screen.getByLabelText("SD card destination"));
+    await userEvent.type(screen.getByLabelText("SD card destination"), "/new/games");
+    await userEvent.click(screen.getByRole("button", { name: "Save SD card path" }));
+    expect(await screen.findByText("SD card path saved.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Back to installer" }));
+    expect(screen.queryByText("SD card path saved.")).not.toBeInTheDocument();
+    expect(screen.getByText("Install to: /new/games")).toBeInTheDocument();
+  });
+
+  it("returns to the browse screen after Install another game", async () => {
+    vi.useFakeTimers();
+    mockRoute("settings_read", () => ({ sd_card_path: "/games" }));
+    mockRoute("list_usb_mounts", () => ["/usb"]);
+    mockRoute("list_zip_files", () => ["/usb/Game.zip"]);
+    configureInstall();
+    mockRoute("can_link_saves", () => ({ available: false, reason: "" }));
+
+    renderPlugin();
+    await flushEffects();
+    await beginInstall();
+    await completeProgress();
+
+    fireEvent.click(screen.getByRole("button", { name: "Install another game" }));
+
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back to installer" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("SD card destination")).not.toBeInTheDocument();
+  });
+});
+
 describe("browse screen controls", () => {
   it("refreshes USB mounts and updates status", async () => {
     await renderSettled();
