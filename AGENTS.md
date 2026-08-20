@@ -17,14 +17,15 @@ Action flow (in order):
 
    **Case A — ZIP has a single top-level subfolder:**
    - Check whether that subfolder name already exists at the destination root.
-   - If it does → surface an error (do not crash Decky) and stop.
+   - If it does → offer overwrite, delete-and-reinstall, install alongside with
+     the next available numbered suffix (`_2`, `_3`, etc.), or cancel.
    - If it does not → extract the ZIP into the destination root (subfolder is created
      by extraction), then cd into that new subfolder.
 
    **Case B — ZIP contents are flat (no single top-level subfolder):**
    - Derive the target folder name as the ZIP filename minus the `.zip` extension.
    - Check whether a folder with that name already exists at the destination root.
-   - If it does → surface an error (do not crash Decky) and stop.
+   - If it does → offer the same conflict choices as Case A.
    - If it does not → create the folder, then extract the ZIP into the destination root
      so contents land inside the new folder (extract with dest = destination root,
      folder already present), then cd into that folder.
@@ -83,7 +84,8 @@ Current backend methods:
 - detect_sd_mount()
 - list_zip_files(mount_path)
 - start_copy(zip_path, dest_root) — starts async chunked copy; returns immediately
-- start_extract(zip_path, dest_root) — starts async extraction with Case A/B logic; deletes ZIP on success; returns immediately
+- check_extract_conflict(zip_path, dest_root) — reports the target folder conflict and next available suffixed name
+- start_extract(zip_path, dest_root, overwrite=False, replace=False, suffix=False) — starts async extraction with Case A/B and conflict-resolution logic; deletes ZIP on success; returns immediately
 - get_progress() — polls current op: {operation, percent, done, error, result}
 - get_launchers(game_dir) — returns {launchers: [...paths], type: "sh"|"exe"|null}
 - ensure_executable(launcher_path) — chmod +x

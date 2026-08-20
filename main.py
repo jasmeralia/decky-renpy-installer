@@ -67,6 +67,14 @@ def _safe_folder_name(name: str) -> str:
     return name or "RenPyGame"
 
 
+def _next_available_folder_name(dest_root: Path, folder_name: str) -> str:
+    """Return the first available numbered variant, starting with ``_2``."""
+    suffix = 2
+    while (dest_root / f"{folder_name}_{suffix}").exists():
+        suffix += 1
+    return f"{folder_name}_{suffix}"
+
+
 def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
@@ -392,8 +400,13 @@ def _safe_extract_target(base_dir: Path, member_name: str) -> Path:
     return target
 
 
-def _extract_member(zf: zipfile.ZipFile, member: zipfile.ZipInfo, base_dir: Path) -> int:
-    target = _safe_extract_target(base_dir, member.filename)
+def _extract_member(
+    zf: zipfile.ZipFile,
+    member: zipfile.ZipInfo,
+    base_dir: Path,
+    member_name: Optional[str] = None,
+) -> int:
+    target = _safe_extract_target(base_dir, member_name if member_name is not None else member.filename)
     if member.is_dir():
         target.mkdir(parents=True, exist_ok=True)
         return 0
@@ -443,7 +456,13 @@ def _ensure_executable_tree(game_dir: Path) -> int:
     return changed
 
 
-def _extract_sync(zip_path: str, dest_root: str, overwrite: bool = False, replace: bool = False) -> str:
+def _extract_sync(
+    zip_path: str,
+    dest_root: str,
+    overwrite: bool = False,
+    replace: bool = False,
+    suffix: bool = False,
+) -> str:
     global _progress
     zip_p = Path(zip_path).expanduser()
     dest_p = Path(dest_root).expanduser()
@@ -457,58 +476,53 @@ def _extract_sync(zip_path: str, dest_root: str, overwrite: bool = False, replac
         _set_progress(bytes_total=total_bytes, bytes_done=0, current_file="")
         extracted_bytes = 0
 
-        if top_folder:
-            # Case A: all entries under a single top-level subfolder.
-            game_dir = dest_p / top_folder
-            logger.info("Case A: extracting with top folder '%s' → %s", top_folder, game_dir)
-            if game_dir.exists():
-                if replace:
-                    logger.info("Deleting existing folder for clean reinstall: %s", game_dir)
-                    shutil.rmtree(game_dir)
-                elif not overwrite:
-                    logger.error("Destination folder already exists: %s", game_dir)
-                    raise RuntimeError(
-                        f"Folder '{top_folder}' already exists at destination: {game_dir}"
-                    )
-                else:
-                    logger.info("Overwriting files in existing folder: %s", game_dir)
-            for member in members:
-                _set_progress(current_file=member.filename)
-                member_done = 0
-                for member_done in _extract_member(zf, member, dest_p):
-                    pct = int((extracted_bytes + member_done) / total_bytes * 100)
-                    _set_progress(percent=pct, bytes_done=extracted_bytes + member_done)
-                extracted_bytes += member.file_size
-                pct = int(extracted_bytes / total_bytes * 100)
-                _set_progress(percent=pct, bytes_done=extracted_bytes)
-                logger.debug("Extract progress: %d%% (%d / %d bytes, %s)", pct, extracted_bytes, total_bytes, member.filename)
-        else:
-            # Case B: flat ZIP. Create a folder named after the ZIP file.
-            folder_name = _safe_folder_name(zip_p.name)
+        folder_name = top_folder if top_folder else _safe_folder_name(zip_p.name)
+        game_dir = dest_p / folder_name
+        suffix_applied = suffix
+        if suffix:
+            folder_name = _next_available_folder_name(dest_p, folder_name)
             game_dir = dest_p / folder_name
-            logger.info("Case B: flat ZIP, creating folder '%s' → %s", folder_name, game_dir)
-            if game_dir.exists():
-                if replace:
-                    logger.info("Deleting existing folder for clean reinstall: %s", game_dir)
-                    shutil.rmtree(game_dir)
-                elif not overwrite:
-                    logger.error("Destination folder already exists: %s", game_dir)
-                    raise RuntimeError(
-                        f"Folder '{folder_name}' already exists at destination: {game_dir}"
-                    )
-                else:
-                    logger.info("Overwriting files in existing folder: %s", game_dir)
+            logger.info("Installing alongside existing folder as: %s", game_dir)
+        elif game_dir.exists():
+            if replace:
+                logger.info("Deleting existing folder for clean reinstall: %s", game_dir)
+                shutil.rmtree(game_dir)
+            elif not overwrite:
+                logger.error("Destination folder already exists: %s", game_dir)
+                raise RuntimeError(
+                    f"Folder '{folder_name}' already exists at destination: {game_dir}"
+                )
+            else:
+                logger.info("Overwriting files in existing folder: %s", game_dir)
+
+        if top_folder and not suffix_applied:
+            # Preserve the ZIP's top-level folder for a normal install.
+            extract_root = dest_p
+            logger.info("Case A: extracting with top folder '%s' → %s", top_folder, game_dir)
+        else:
+            # Flat ZIPs always extract into their target folder. For a suffixed
+            # Case A install, strip the archived top folder so it can be renamed.
+            extract_root = game_dir
             game_dir.mkdir(parents=True, exist_ok=True)
-            for member in members:
-                _set_progress(current_file=member.filename)
-                member_done = 0
-                for member_done in _extract_member(zf, member, game_dir):
-                    pct = int((extracted_bytes + member_done) / total_bytes * 100)
-                    _set_progress(percent=pct, bytes_done=extracted_bytes + member_done)
-                extracted_bytes += member.file_size
-                pct = int(extracted_bytes / total_bytes * 100)
-                _set_progress(percent=pct, bytes_done=extracted_bytes)
-                logger.debug("Extract progress: %d%% (%d / %d bytes, %s)", pct, extracted_bytes, total_bytes, member.filename)
+            logger.info("Extracting ZIP contents into target folder: %s", game_dir)
+
+        for member in members:
+            _set_progress(current_file=member.filename)
+            member_name: Optional[str] = None
+            if top_folder and suffix_applied:
+                normalized = member.filename.replace("\\", "/").strip("/")
+                if normalized == top_folder:
+                    extracted_bytes += member.file_size
+                    continue
+                member_name = normalized[len(top_folder) + 1:]
+            member_done = 0
+            for member_done in _extract_member(zf, member, extract_root, member_name):
+                pct = int((extracted_bytes + member_done) / total_bytes * 100)
+                _set_progress(percent=pct, bytes_done=extracted_bytes + member_done)
+            extracted_bytes += member.file_size
+            pct = int(extracted_bytes / total_bytes * 100)
+            _set_progress(percent=pct, bytes_done=extracted_bytes)
+            logger.debug("Extract progress: %d%% (%d / %d bytes, %s)", pct, extracted_bytes, total_bytes, member.filename)
 
     logger.info("Extraction complete, game_dir=%s", game_dir)
     _ensure_executable_tree(game_dir)
@@ -527,11 +541,17 @@ def _extract_sync(zip_path: str, dest_root: str, overwrite: bool = False, replac
     return str(game_dir)
 
 
-async def _do_extract(zip_path: str, dest_root: str, overwrite: bool = False, replace: bool = False) -> None:
+async def _do_extract(
+    zip_path: str,
+    dest_root: str,
+    overwrite: bool = False,
+    replace: bool = False,
+    suffix: bool = False,
+) -> None:
     global _progress
     try:
         game_dir = await asyncio.wait_for(
-            asyncio.to_thread(_extract_sync, zip_path, dest_root, overwrite, replace),
+            asyncio.to_thread(_extract_sync, zip_path, dest_root, overwrite, replace, suffix),
             timeout=_EXTRACT_TIMEOUT_SECONDS,
         )
         _progress.update({"percent": 100, "done": True, "result": {"game_dir": game_dir}, "updated_at": time.time()})
@@ -703,11 +723,30 @@ class Plugin:
         folder_name = top_folder if top_folder else _safe_folder_name(zip_p.name)
         conflict = (dest_p / folder_name).exists()
         logger.info("check_extract_conflict: folder=%s conflict=%s", folder_name, conflict)
-        return {"conflict": conflict, "folder_name": folder_name}
+        suffix_folder_name = _next_available_folder_name(dest_p, folder_name) if conflict else None
+        return {
+            "conflict": conflict,
+            "folder_name": folder_name,
+            "suffix_folder_name": suffix_folder_name,
+        }
 
-    async def start_extract(self, zip_path: str, dest_root: str, overwrite: bool = False, replace: bool = False) -> Dict[str, Any]:
+    async def start_extract(
+        self,
+        zip_path: str,
+        dest_root: str,
+        overwrite: bool = False,
+        replace: bool = False,
+        suffix: bool = False,
+    ) -> Dict[str, Any]:
         global _progress, _active_task
-        logger.info("start_extract: zip_path=%s dest_root=%s overwrite=%s replace=%s", zip_path, dest_root, overwrite, replace)
+        logger.info(
+            "start_extract: zip_path=%s dest_root=%s overwrite=%s replace=%s suffix=%s",
+            zip_path,
+            dest_root,
+            overwrite,
+            replace,
+            suffix,
+        )
         _progress = {
             "operation": "extract",
             "percent": 0,
@@ -722,7 +761,7 @@ class Plugin:
         if _active_task and not _active_task.done():
             logger.warning("Cancelling in-flight task before starting new extract")
             _active_task.cancel()
-        _active_task = asyncio.create_task(_do_extract(zip_path, dest_root, overwrite, replace))
+        _active_task = asyncio.create_task(_do_extract(zip_path, dest_root, overwrite, replace, suffix))
         return {"started": True}
 
     # --- Launcher discovery ---

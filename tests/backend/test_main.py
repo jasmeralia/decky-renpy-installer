@@ -167,6 +167,70 @@ def test_extract_existing_folder_errors_and_keeps_zip(tmp_path: Path):
     assert zip_path.exists()
 
 
+def test_extract_top_folder_with_suffix_uses_next_available_name(tmp_path: Path):
+    main = load_main()
+    zip_path = tmp_path / "Game.zip"
+    make_zip(zip_path, {"Game/launcher.sh": b"#!/bin/sh\n", "Game/game/script.rpy": b"data"})
+    dest_root = tmp_path / "dest"
+    (dest_root / "Game").mkdir(parents=True)
+    (dest_root / "Game_2").mkdir()
+
+    game_dir = Path(main._extract_sync(str(zip_path), str(dest_root), suffix=True))
+
+    assert game_dir == dest_root / "Game_3"
+    assert (game_dir / "launcher.sh").exists()
+    assert (game_dir / "game" / "script.rpy").read_bytes() == b"data"
+    assert not (game_dir / "Game").exists()
+    assert not zip_path.exists()
+
+
+def test_extract_flat_zip_with_suffix_preserves_existing_folder(tmp_path: Path):
+    main = load_main()
+    zip_path = tmp_path / "Flat Game.zip"
+    make_zip(zip_path, {"launcher.sh": b"#!/bin/sh\n"})
+    dest_root = tmp_path / "dest"
+    existing = dest_root / "Flat Game"
+    existing.mkdir(parents=True)
+    (existing / "keep.txt").write_text("existing")
+
+    game_dir = Path(main._extract_sync(str(zip_path), str(dest_root), suffix=True))
+
+    assert game_dir == dest_root / "Flat Game_2"
+    assert (game_dir / "launcher.sh").exists()
+    assert (existing / "keep.txt").read_text() == "existing"
+
+
+def test_extract_suffix_choice_still_uses_suffix_if_conflict_disappears(tmp_path: Path):
+    main = load_main()
+    zip_path = tmp_path / "Game.zip"
+    make_zip(zip_path, {"Game/launcher.sh": b"#!/bin/sh\n"})
+    dest_root = tmp_path / "dest"
+    dest_root.mkdir()
+
+    game_dir = Path(main._extract_sync(str(zip_path), str(dest_root), suffix=True))
+
+    assert game_dir == dest_root / "Game_2"
+    assert (game_dir / "launcher.sh").exists()
+    assert not (dest_root / "Game").exists()
+
+
+def test_conflict_check_returns_next_available_suffix(tmp_path: Path):
+    main = load_main()
+    zip_path = tmp_path / "Game.zip"
+    make_zip(zip_path, {"Game/launcher.sh": b"#!/bin/sh\n"})
+    dest_root = tmp_path / "dest"
+    (dest_root / "Game").mkdir(parents=True)
+    (dest_root / "Game_2").mkdir()
+
+    result = asyncio.run(main.Plugin().check_extract_conflict(str(zip_path), str(dest_root)))
+
+    assert result == {
+        "conflict": True,
+        "folder_name": "Game",
+        "suffix_folder_name": "Game_3",
+    }
+
+
 def test_launcher_discovery_prefers_sh(tmp_path: Path):
     main = load_main()
     game_dir = tmp_path / "Game"
@@ -668,10 +732,12 @@ def test_plugin_conflict_checks_top_folder_and_flat_zip(tmp_path: Path):
     assert asyncio.run(plugin.check_extract_conflict(str(nested_zip), str(dest))) == {
         "conflict": True,
         "folder_name": "Nested",
+        "suffix_folder_name": "Nested_2",
     }
     assert asyncio.run(plugin.check_extract_conflict(str(flat_zip), str(dest))) == {
         "conflict": False,
         "folder_name": "Flat Game",
+        "suffix_folder_name": None,
     }
 
 
@@ -681,8 +747,8 @@ def test_plugin_start_extract_cancels_inflight_task(tmp_path: Path):
     async def scenario():
         calls = []
 
-        async def blocking_extract(zip_path, dest_root, overwrite, replace):
-            calls.append((zip_path, dest_root, overwrite, replace))
+        async def blocking_extract(zip_path, dest_root, overwrite, replace, suffix):
+            calls.append((zip_path, dest_root, overwrite, replace, suffix))
             await asyncio.sleep(3600)
 
         main._do_extract = blocking_extract
@@ -690,15 +756,15 @@ def test_plugin_start_extract_cancels_inflight_task(tmp_path: Path):
         await plugin.start_extract("first.zip", str(tmp_path), True, False)
         first_task = main._active_task
         await asyncio.sleep(0)
-        result = await plugin.start_extract("second.zip", str(tmp_path), False, True)
+        result = await plugin.start_extract("second.zip", str(tmp_path), False, False, True)
         second_task = main._active_task
         await asyncio.sleep(0)
         assert result == {"started": True}
         assert first_task.cancelled()
         assert main._progress["operation"] == "extract"
         assert calls == [
-            ("first.zip", str(tmp_path), True, False),
-            ("second.zip", str(tmp_path), False, True),
+            ("first.zip", str(tmp_path), True, False, False),
+            ("second.zip", str(tmp_path), False, False, True),
         ]
         second_task.cancel()
         await asyncio.sleep(0)

@@ -8,6 +8,8 @@ number at merge time, in-flight changes go under `## [Unreleased]`.
 ## [Unreleased]
 
 ### Added
+- Game-folder conflicts can now be installed alongside the existing game using
+  the next available numbered suffix (for example, `Astreon-pc_2`).
 - CI now publishes frontend and backend coverage to Codecov as informational
   reports while the combined baseline remains below 80%.
 - Meaningful frontend installer-state and backend behavior tests now raise
