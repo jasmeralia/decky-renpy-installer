@@ -3,6 +3,8 @@
 Starter scaffold for a Decky Loader plugin that:
 - copies a ZIP from USB to a destination root (SD/internal),
 - extracts it,
+- resolves an existing game-folder conflict by updating in place, reinstalling,
+  or choosing the next numbered folder so both installs can coexist,
 - deletes the copied ZIP,
 - finds the Ren'Py launcher `.sh`,
 - adds a Steam Non-Steam shortcut (frontend uses `SteamClient.Apps.AddShortcut` when available).

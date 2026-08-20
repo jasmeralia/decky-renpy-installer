@@ -233,7 +233,11 @@ function configureInstall(options: {
   ];
   mockRoute("check_extract_conflict", () => {
     if (options.conflictThrows) throw new Error("inspection failed");
-    return { conflict: options.conflict ?? false, folder_name: "Game" };
+    return {
+      conflict: options.conflict ?? false,
+      folder_name: "Game",
+      suffix_folder_name: options.conflict ? "Game_2" : null,
+    };
   });
   mockRoute("start_copy", () => ({ started: true }));
   mockRoute("start_extract", () => ({ started: true }));
@@ -655,9 +659,10 @@ describe("installer state and conflicts", () => {
   });
 
   it.each([
-    ["Overwrite (update files in place)", true, false],
-    ["Delete and reinstall", false, true],
-  ])("handles conflict choice %s", async (buttonName, overwrite, replace) => {
+    ["Overwrite (update files in place)", true, false, false],
+    ["Delete and reinstall", false, true, false],
+    ['Install as "Game_2"', false, false, true],
+  ])("handles conflict choice %s", async (buttonName, overwrite, replace, suffix) => {
     configureInstall({ conflict: true });
     renderPlugin();
     await flushEffects();
@@ -674,6 +679,7 @@ describe("installer state and conflicts", () => {
       "/games",
       overwrite,
       replace,
+      suffix,
     ]);
     expect(screen.getByText(/"Game" added to Steam/)).toBeInTheDocument();
   });
