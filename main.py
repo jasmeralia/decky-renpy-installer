@@ -29,6 +29,7 @@ _LOG_LEVELS = {"debug": logging.DEBUG, "info": logging.INFO, "warn": logging.WAR
 # Module-level state — avoids self.method() binding issues with Decky Loader's
 # plugin proxy, which can call _main with the class rather than an instance.
 _progress: Dict[str, Any] = {
+    "job_id": 0,
     "operation": "",
     "percent": 0,
     "bytes_done": 0,
@@ -38,8 +39,10 @@ _progress: Dict[str, Any] = {
     "done": True,
     "error": None,
     "result": None,
+    "request": None,
 }
 _active_task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
+_job_id_counter: int = 0
 _EXTRACT_TIMEOUT_SECONDS = 7200
 
 
@@ -53,6 +56,12 @@ class UsbPartition:
 def _set_progress(**updates: Any) -> None:
     _progress.update(updates)
     _progress["updated_at"] = time.time()
+
+
+def _next_job_id() -> int:
+    global _job_id_counter
+    _job_id_counter += 1
+    return _job_id_counter
 
 
 def _apply_log_level(level_str: str) -> None:
@@ -380,17 +389,6 @@ def _copy_sync(zip_path: str, dest_root: str) -> str:
     return str(dst)
 
 
-async def _do_copy(zip_path: str, dest_root: str) -> None:
-    global _progress
-    try:
-        dest_zip = await asyncio.to_thread(_copy_sync, zip_path, dest_root)
-        _progress.update({"percent": 100, "done": True, "result": {"dest_zip": dest_zip}})
-        logger.info("Copy task finished: dest_zip=%s", dest_zip)
-    except Exception as e:
-        logger.exception("Copy failed: %s", e)
-        _progress.update({"done": True, "error": str(e)})
-
-
 def _safe_extract_target(base_dir: Path, member_name: str) -> Path:
     normalized = member_name.replace("\\", "/")
     target = (base_dir / normalized).resolve()
@@ -541,27 +539,27 @@ def _extract_sync(
     return str(game_dir)
 
 
-async def _do_extract(
-    zip_path: str,
-    dest_root: str,
-    overwrite: bool = False,
-    replace: bool = False,
-    suffix: bool = False,
+async def _do_install(
+    usb_zip_path: str, dest_root: str, overwrite: bool, replace: bool, suffix: bool
 ) -> None:
     global _progress
     try:
+        dest_zip = await asyncio.to_thread(_copy_sync, usb_zip_path, dest_root)
+        _progress.update({
+            "operation": "extract", "percent": 0, "bytes_done": 0,
+            "bytes_total": 0, "current_file": "", "updated_at": time.time(),
+        })
         game_dir = await asyncio.wait_for(
-            asyncio.to_thread(_extract_sync, zip_path, dest_root, overwrite, replace, suffix),
+            asyncio.to_thread(_extract_sync, dest_zip, dest_root, overwrite, replace, suffix),
             timeout=_EXTRACT_TIMEOUT_SECONDS,
         )
         _progress.update({"percent": 100, "done": True, "result": {"game_dir": game_dir}, "updated_at": time.time()})
-        logger.info("Extract task finished: game_dir=%s", game_dir)
     except asyncio.TimeoutError:
         message = f"Extraction timed out after {_EXTRACT_TIMEOUT_SECONDS} seconds"
         logger.exception(message)
         _progress.update({"done": True, "error": message, "updated_at": time.time()})
     except Exception as e:
-        logger.exception("Extract failed: %s", e)
+        logger.exception("Install failed: %s", e)
         _progress.update({"done": True, "error": str(e), "updated_at": time.time()})
 
 
@@ -692,29 +690,7 @@ class Plugin:
         logger.debug("get_progress: op=%s pct=%d done=%s error=%s", p.get("operation"), p.get("percent"), p.get("done"), p.get("error"))
         return p
 
-    # --- Copy (USB → SD card) ---
-
-    async def start_copy(self, zip_path: str, dest_root: str) -> Dict[str, Any]:
-        global _progress, _active_task
-        logger.info("start_copy: zip_path=%s dest_root=%s", zip_path, dest_root)
-        _progress = {
-            "operation": "copy",
-            "percent": 0,
-            "bytes_done": 0,
-            "bytes_total": 0,
-            "current_file": "",
-            "updated_at": time.time(),
-            "done": False,
-            "error": None,
-            "result": None,
-        }
-        if _active_task and not _active_task.done():
-            logger.warning("Cancelling in-flight task before starting new copy")
-            _active_task.cancel()
-        _active_task = asyncio.create_task(_do_copy(zip_path, dest_root))
-        return {"started": True}
-
-    # --- Extract (SD card ZIP → game folder) ---
+    # --- Install (USB ZIP → SD card game folder) ---
 
     async def check_extract_conflict(self, zip_path: str, dest_root: str) -> Dict[str, Any]:
         zip_p = Path(zip_path).expanduser()
@@ -730,39 +706,41 @@ class Plugin:
             "suffix_folder_name": suffix_folder_name,
         }
 
-    async def start_extract(
+    async def start_install(
         self,
-        zip_path: str,
+        usb_zip_path: str,
         dest_root: str,
         overwrite: bool = False,
         replace: bool = False,
         suffix: bool = False,
     ) -> Dict[str, Any]:
         global _progress, _active_task
+        if _active_task and not _active_task.done():
+            logger.info(
+                "start_install: rejected, job %d already active (%s)",
+                _progress.get("job_id", 0), _progress.get("operation"),
+            )
+            return {
+                "started": False, "busy": True,
+                "job_id": _progress.get("job_id", 0),
+                "operation": _progress.get("operation", ""),
+            }
+        job_id = _next_job_id()
         logger.info(
-            "start_extract: zip_path=%s dest_root=%s overwrite=%s replace=%s suffix=%s",
-            zip_path,
-            dest_root,
-            overwrite,
-            replace,
-            suffix,
+            "start_install: job=%d zip=%s dest=%s overwrite=%s replace=%s suffix=%s",
+            job_id, usb_zip_path, dest_root, overwrite, replace, suffix,
         )
         _progress = {
-            "operation": "extract",
-            "percent": 0,
-            "bytes_done": 0,
-            "bytes_total": 0,
-            "current_file": "",
-            "updated_at": time.time(),
-            "done": False,
-            "error": None,
-            "result": None,
+            "job_id": job_id, "operation": "copy", "percent": 0,
+            "bytes_done": 0, "bytes_total": 0, "current_file": "",
+            "updated_at": time.time(), "done": False, "error": None, "result": None,
+            "request": {
+                "usb_zip_path": usb_zip_path, "dest_root": dest_root,
+                "overwrite": overwrite, "replace": replace, "suffix": suffix,
+            },
         }
-        if _active_task and not _active_task.done():
-            logger.warning("Cancelling in-flight task before starting new extract")
-            _active_task.cancel()
-        _active_task = asyncio.create_task(_do_extract(zip_path, dest_root, overwrite, replace, suffix))
-        return {"started": True}
+        _active_task = asyncio.create_task(_do_install(usb_zip_path, dest_root, overwrite, replace, suffix))
+        return {"started": True, "busy": False, "job_id": job_id}
 
     # --- Launcher discovery ---
 

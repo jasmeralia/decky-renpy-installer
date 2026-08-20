@@ -90,7 +90,16 @@ type Step =
   | "complete"
   | "error";
 
+type ProgressRequest = {
+  usb_zip_path: string;
+  dest_root: string;
+  overwrite: boolean;
+  replace: boolean;
+  suffix: boolean;
+};
+
 type ProgressResult = {
+  job_id: number;
   operation: string;
   percent: number;
   bytes_done: number;
@@ -100,7 +109,10 @@ type ProgressResult = {
   done: boolean;
   error: string | null;
   result: Record<string, string> | null;
+  request: ProgressRequest | null;
 };
+
+type StartInstallResult = { started: boolean; busy: boolean; job_id: number; operation?: string };
 
 type LaunchersResult = {
   launchers: string[];
@@ -139,10 +151,6 @@ async function listZipFiles(mount_path: string): Promise<string[]> {
   return call<[string], string[]>("list_zip_files", mount_path);
 }
 
-async function startCopy(zip_path: string, dest_root: string): Promise<void> {
-  await call<[string, string]>("start_copy", zip_path, dest_root);
-}
-
 type ConflictResult = {
   conflict: boolean;
   folder_name: string;
@@ -153,16 +161,16 @@ async function checkExtractConflict(zip_path: string, dest_root: string): Promis
   return call<[string, string], ConflictResult>("check_extract_conflict", zip_path, dest_root);
 }
 
-async function startExtract(
-  zip_path: string,
+async function startInstall(
+  usb_zip_path: string,
   dest_root: string,
   overwrite = false,
   replace = false,
   suffix = false,
-): Promise<void> {
-  await call<[string, string, boolean, boolean, boolean]>(
-    "start_extract",
-    zip_path,
+): Promise<StartInstallResult> {
+  return call<[string, string, boolean, boolean, boolean], StartInstallResult>(
+    "start_install",
+    usb_zip_path,
     dest_root,
     overwrite,
     replace,
@@ -286,6 +294,7 @@ export default definePlugin(() => {
     const [settingsStatus, setSettingsStatus] = useState("");
     const [mountStatus, setMountStatus] = useState("");
     const [logLevel, setLogLevel] = useState<LogLevel>("error");
+    const [unseenResult, setUnseenResult] = useState<ProgressResult | null>(null);
 
     const [currentZipName, setCurrentZipName] = useState("");
     const [conflictFolderName, setConflictFolderName] = useState("");
@@ -307,7 +316,7 @@ export default definePlugin(() => {
 
     // Resolves once the backend operation completes, streaming percent + speed updates.
     const waitForProgress = useCallback(
-      (onUpdate: (pct: number, bps: number) => void): Promise<ProgressResult> =>
+      (onUpdate: (pct: number, bps: number, operation: string) => void): Promise<ProgressResult> =>
         new Promise((resolve) => {
           stopPolling();
           prevSpeedBytes.current = 0;
@@ -325,7 +334,7 @@ export default definePlugin(() => {
                 prevSpeedBytes.current = p.bytes_done;
                 prevSpeedTime.current = now;
               }
-              onUpdate(p.percent, bps);
+              onUpdate(p.percent, bps, p.operation);
               if (p.done) {
                 stopPolling();
                 if (p.error) {
@@ -339,6 +348,7 @@ export default definePlugin(() => {
               log("error", "getProgress poll threw:", e);
               stopPolling();
               resolve({
+                job_id: 0,
                 operation: "",
                 percent: 0,
                 bytes_done: 0,
@@ -346,6 +356,7 @@ export default definePlugin(() => {
                 done: true,
                 error: String(e),
                 result: null,
+                request: null,
               });
             }
           }, 500);
@@ -359,6 +370,23 @@ export default definePlugin(() => {
     // Load settings and detect mounts on mount
     useEffect(() => {
       (async () => {
+        try {
+          const active = await getProgress();
+          if (!active.done) {
+            log("info", "Resuming in-progress job on mount: job_id=%d operation=%s", active.job_id, active.operation);
+            void awaitInstallCompletion().catch((e) => {
+              log("error", "Resumed install failed:", e);
+              setErrorMsg(String(e));
+              setStep("error");
+            });
+            return;
+          }
+          if (active.operation !== "" && (active.result || active.error)) {
+            setUnseenResult(active);
+          }
+        } catch (e) {
+          log("warn", "getProgress on mount failed (non-fatal):", e);
+        }
         log("debug", "Loading settings and detecting mounts...");
         let hasSdSetting = false;
         try {
@@ -703,6 +731,40 @@ export default definePlugin(() => {
       }
     };
 
+    const awaitInstallCompletion = async (): Promise<void> => {
+      const initial = await getProgress();
+      if (initial.request) {
+        setCurrentZipName(basename(initial.request.usb_zip_path));
+      }
+      setStep(initial.operation === "extract" ? "extracting" : "copying");
+      setProgress(initial.percent);
+      setUsbSafeMsg(initial.operation === "extract");
+      operationStartTime.current = Date.now();
+
+      const result = await waitForProgress((pct, bps, operation) => {
+        setProgress(pct);
+        setSpeedBytesPerSec(bps);
+        setStep(operation === "extract" ? "extracting" : "copying");
+        if (operation === "extract") setUsbSafeMsg(true);
+      });
+      if (result.error) throw new Error(result.error);
+      const gameDir = result.result!.game_dir;
+
+      const lr = await getLaunchers(gameDir);
+      if (!lr.launchers.length || !lr.type) {
+        throw new Error("No .sh or .exe launcher found in the game folder.");
+      }
+      if (lr.launchers.length === 1) {
+        await ensureExecutable(lr.launchers[0]);
+        await finishInstall(gameDir, lr.launchers[0], lr.type);
+      } else {
+        setPendingGameDir(gameDir);
+        setLaunchers(lr.launchers);
+        setLauncherType(lr.type);
+        setStep("launcher_pick");
+      }
+    };
+
     const doInstall = async (
       usbZipPath: string,
       overwrite: boolean,
@@ -710,52 +772,11 @@ export default definePlugin(() => {
       suffix = false,
     ) => {
       try {
-        operationStartTime.current = Date.now();
-        setStep("copying");
-        setProgress(0);
-        log("info", "Starting copy: %s → %s", usbZipPath, destRoot);
-        await startCopy(usbZipPath, destRoot);
-        const copyResult = await waitForProgress((pct, bps) => { setProgress(pct); setSpeedBytesPerSec(bps); });
-        if (copyResult.error) throw new Error(copyResult.error);
-        const destZip = copyResult.result!.dest_zip;
-        log("info", "Copy finished, destZip:", destZip);
-
-        setUsbSafeMsg(true);
-        operationStartTime.current = Date.now();
-        setStep("extracting");
-        setProgress(0);
-        log(
-          "info",
-          "Starting extract: %s → %s overwrite=%s replace=%s suffix=%s",
-          destZip,
-          destRoot,
-          overwrite,
-          replace,
-          suffix,
-        );
-        await startExtract(destZip, destRoot, overwrite, replace, suffix);
-        const extractResult = await waitForProgress((pct, bps) => { setProgress(pct); setSpeedBytesPerSec(bps); });
-        if (extractResult.error) throw new Error(extractResult.error);
-        const gameDir = extractResult.result!.game_dir;
-        log("info", "Extract finished, gameDir:", gameDir);
-
-        log("info", "Getting launchers for:", gameDir);
-        const lr = await getLaunchers(gameDir);
-        log("info", "getLaunchers result:", lr);
-        if (!lr.launchers.length || !lr.type) {
-          throw new Error("No .sh or .exe launcher found in the game folder.");
+        const started = await startInstall(usbZipPath, destRoot, overwrite, replace, suffix);
+        if (started.busy) {
+          log("warn", "Install already in progress (job %d, %s) — attaching instead of starting a new one", started.job_id, started.operation);
         }
-        if (lr.launchers.length === 1) {
-          log("info", "Single launcher found, using:", lr.launchers[0]);
-          await ensureExecutable(lr.launchers[0]);
-          await finishInstall(gameDir, lr.launchers[0], lr.type);
-        } else {
-          log("info", "Multiple launchers found (%d), presenting selection", lr.launchers.length);
-          setPendingGameDir(gameDir);
-          setLaunchers(lr.launchers);
-          setLauncherType(lr.type);
-          setStep("launcher_pick");
-        }
+        await awaitInstallCompletion();
       } catch (e) {
         log("error", "doInstall flow failed:", e);
         setErrorMsg(String(e));
@@ -1103,6 +1124,22 @@ export default definePlugin(() => {
     // Browse step
     return (
       <PanelSection title="Renpy ZIP Installer">
+        {page === "browse" && step === "browse" && unseenResult !== null ? (
+          <>
+            <PanelSectionRow>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                {unseenResult.error === null
+                  ? `A previous install of "${basename(unseenResult.request?.usb_zip_path ?? "")}" finished while you were away. It was extracted to the SD card but was not added to Steam automatically.`
+                  : `A previous install of "${basename(unseenResult.request?.usb_zip_path ?? "")}" failed while you were away: ${unseenResult.error}`}
+              </div>
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem layout="below" onClick={() => setUnseenResult(null)}>
+                Dismiss
+              </ButtonItem>
+            </PanelSectionRow>
+          </>
+        ) : null}
         {mountStatus ? (
           <PanelSectionRow>
             <div style={{ fontSize: 11, opacity: 0.7 }}>{mountStatus}</div>

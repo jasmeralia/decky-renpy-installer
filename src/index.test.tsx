@@ -155,6 +155,7 @@ interface WindowWithSteamClient extends Window {
 }
 
 interface ProgressResult {
+  job_id: number;
   operation: string;
   percent: number;
   bytes_done: number;
@@ -162,6 +163,15 @@ interface ProgressResult {
   done: boolean;
   error: string | null;
   result: Record<string, string> | null;
+  request: ProgressRequest | null;
+}
+
+interface ProgressRequest {
+  usb_zip_path: string;
+  dest_root: string;
+  overwrite: boolean;
+  replace: boolean;
+  suffix: boolean;
 }
 
 function pluginFactory(): PluginDefinition {
@@ -213,6 +223,7 @@ function progressResult(
   overrides: Partial<ProgressResult> = {},
 ): ProgressResult {
   return {
+    job_id: 1,
     operation,
     percent: 100,
     bytes_done: 100,
@@ -220,7 +231,28 @@ function progressResult(
     done: true,
     error: null,
     result,
+    request: {
+      usb_zip_path: "/usb/Game.zip",
+      dest_root: "/games",
+      overwrite: false,
+      replace: false,
+      suffix: false,
+    },
     ...overrides,
+  };
+}
+
+function coldProgress(): ProgressResult {
+  return {
+    job_id: 0,
+    operation: "",
+    percent: 0,
+    bytes_done: 0,
+    bytes_total: 0,
+    done: true,
+    error: null,
+    result: null,
+    request: null,
   };
 }
 
@@ -232,8 +264,10 @@ function configureInstall(options: {
 } = {}): void {
   const launcherPaths = options.launcherPaths ?? ["/games/Game/run.sh"];
   const launcherType = options.launcherType === undefined ? "sh" : options.launcherType;
+  let installStarted = false;
   const polls = [
-    progressResult("copy", { dest_zip: "/games/Game.zip" }),
+    progressResult("copy", null, { percent: 25, bytes_done: 25, done: false }),
+    progressResult("extract", null, { percent: 50, bytes_done: 50, done: false }),
     progressResult("extract", { game_dir: "/games/Game" }),
   ];
   mockRoute("check_extract_conflict", () => {
@@ -244,9 +278,12 @@ function configureInstall(options: {
       suffix_folder_name: options.conflict ? "Game_2" : null,
     };
   });
-  mockRoute("start_copy", () => ({ started: true }));
-  mockRoute("start_extract", () => ({ started: true }));
+  mockRoute("start_install", () => {
+    installStarted = true;
+    return { started: true, busy: false, job_id: 1 };
+  });
   mockRoute("get_progress", () => {
+    if (!installStarted) return coldProgress();
     const next = polls.shift();
     if (!next) throw new Error("No progress result queued");
     return next;
@@ -282,6 +319,7 @@ beforeEach(() => {
   mockRoute("settings_set", () => true);
   mockRoute("settings_commit", () => true);
   mockRoute("set_log_level", () => true);
+  mockRoute("get_progress", () => coldProgress());
   getWindowWithSteamClient().SteamClient = {
     Apps: {
       AddShortcut: vi.fn().mockResolvedValue(123),
@@ -649,8 +687,16 @@ describe("installer state and conflicts", () => {
     await flushEffects();
 
     await beginInstall();
-    expect(screen.getByTestId("progress")).toHaveTextContent("Copying to SD card… 0%");
-    await completeProgress();
+    expect(screen.getByTestId("progress")).toHaveTextContent("Copying to SD card… 25%");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await flushEffects();
+    expect(screen.getByTestId("progress")).toHaveTextContent("Extracting… 50%");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await flushEffects();
 
     expect(screen.getByText(/"Game" added to Steam/)).toBeInTheDocument();
     expect(callsFor("ensure_executable")).toContainEqual([
@@ -744,7 +790,9 @@ describe("installer state and conflicts", () => {
 
     await beginInstall();
 
-    expect(callsFor("start_copy")).toContainEqual(["start_copy", "/usb/Game.zip", "/games"]);
+    expect(callsFor("start_install")).toContainEqual([
+      "start_install", "/usb/Game.zip", "/games", false, false, false,
+    ]);
     await completeProgress();
     expect(screen.getByText(/"Game" added to Steam/)).toBeInTheDocument();
   });
@@ -764,9 +812,9 @@ describe("installer state and conflicts", () => {
     await flushEffects();
     await completeProgress();
 
-    expect(callsFor("start_extract")).toContainEqual([
-      "start_extract",
-      "/games/Game.zip",
+    expect(callsFor("start_install")).toContainEqual([
+      "start_install",
+      "/usb/Game.zip",
       "/games",
       overwrite,
       replace,
@@ -775,7 +823,7 @@ describe("installer state and conflicts", () => {
     expect(screen.getByText(/"Game" added to Steam/)).toBeInTheDocument();
   });
 
-  it("cancels a conflict without copying or extracting", async () => {
+  it("cancels a conflict without starting an install", async () => {
     configureInstall({ conflict: true });
     renderPlugin();
     await flushEffects();
@@ -784,8 +832,172 @@ describe("installer state and conflicts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(screen.getByRole("button", { name: "Game.zip" })).toBeInTheDocument();
-    expect(callsFor("start_copy")).toHaveLength(0);
-    expect(callsFor("start_extract")).toHaveLength(0);
+    expect(callsFor("start_install")).toHaveLength(0);
+  });
+});
+
+describe("resume on mount", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockRoute("get_launchers", () => ({ launchers: ["/games/Game/run.sh"], type: "sh" }));
+    mockRoute("ensure_executable", () => ({ path: "/games/Game/run.sh" }));
+    mockRoute("can_link_saves", () => ({ available: false, reason: "" }));
+  });
+
+  it("reattaches to an in-progress copy job on mount, follows it through extraction, and completes the install", async () => {
+    const polls = [
+      progressResult("copy", null, { percent: 10, bytes_done: 10, done: false }),
+      progressResult("copy", null, { percent: 20, bytes_done: 20, done: false }),
+      progressResult("extract", null, { percent: 40, bytes_done: 40, done: false }),
+      progressResult("extract", { game_dir: "/games/Game" }),
+    ];
+    mockRoute("get_progress", () => {
+      const next = polls.shift();
+      if (!next) throw new Error("No resume progress result queued");
+      return next;
+    });
+
+    renderPlugin();
+    await flushEffects();
+
+    expect(screen.getByTestId("progress")).toHaveTextContent("Copying to SD card… 20%");
+    expect(screen.getByText("Game.zip")).toBeInTheDocument();
+    expect(callsFor("start_install")).toHaveLength(0);
+    expect(callsFor("settings_read")).toHaveLength(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await flushEffects();
+    expect(screen.getByTestId("progress")).toHaveTextContent("Extracting… 40%");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await flushEffects();
+
+    expect(screen.getByText(/"Game" added to Steam/)).toBeInTheDocument();
+    expect(getWindowWithSteamClient().SteamClient?.Apps.AddShortcut).toHaveBeenCalledWith(
+      "Game", "/games/Game/run.sh", "/games/Game", "",
+    );
+  });
+
+  it("reattaches to an in-progress extract job on mount, showing the extracting screen and USB-safe message immediately", async () => {
+    const polls = [
+      progressResult("extract", null, { percent: 30, bytes_done: 30, done: false }),
+      progressResult("extract", null, { percent: 35, bytes_done: 35, done: false }),
+      progressResult("extract", { game_dir: "/games/Game" }),
+    ];
+    mockRoute("get_progress", () => {
+      const next = polls.shift();
+      if (!next) throw new Error("No extract resume progress result queued");
+      return next;
+    });
+
+    renderPlugin();
+    await flushEffects();
+
+    expect(screen.getByTestId("progress")).toHaveTextContent("Extracting… 35%");
+    expect(screen.getByText(/USB drive can be safely removed/)).toBeInTheDocument();
+    expect(callsFor("start_install")).toHaveLength(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await flushEffects();
+    expect(screen.getByText(/"Game" added to Steam/)).toBeInTheDocument();
+  });
+
+  it("shows a dismissible success banner for a job that finished while unmounted, without calling get_launchers or AddShortcut", async () => {
+    mockRoute("get_progress", () => progressResult("extract", { game_dir: "/games/Game" }));
+
+    renderPlugin();
+    await flushEffects();
+
+    expect(screen.getByText(
+      'A previous install of "Game.zip" finished while you were away. It was extracted to the SD card but was not added to Steam automatically.',
+    )).toBeInTheDocument();
+    expect(callsFor("get_launchers")).toHaveLength(0);
+    expect(getWindowWithSteamClient().SteamClient?.Apps.AddShortcut).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/finished while you were away/)).not.toBeInTheDocument();
+  });
+
+  it("shows a dismissible failure banner for a job that failed while unmounted", async () => {
+    mockRoute("get_progress", () => progressResult("extract", null, { error: "broken archive" }));
+
+    renderPlugin();
+    await flushEffects();
+
+    expect(screen.getByText(
+      'A previous install of "Game.zip" failed while you were away: broken archive',
+    )).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    expect(callsFor("get_launchers")).toHaveLength(0);
+    expect(getWindowWithSteamClient().SteamClient?.Apps.AddShortcut).not.toHaveBeenCalled();
+  });
+
+  it("performs the normal cold-start flow when no prior job exists", async () => {
+    vi.useRealTimers();
+    mockRoute("get_progress", () => coldProgress());
+    mockRoute("settings_read", () => ({ sd_card_path: "/games" }));
+    mockRoute("list_usb_mounts", () => ["/usb"]);
+    mockRoute("list_zip_files", () => ["/usb/Game.zip"]);
+
+    await renderSettled();
+    await screen.findByRole("button", { name: "Game.zip" });
+
+    expect(callsFor("get_progress")).toHaveLength(1);
+    expect(callsFor("settings_read")).toHaveLength(1);
+    expect(callsFor("mount_usb_devices")).toHaveLength(1);
+    expect(callsFor("list_usb_mounts")).toHaveLength(1);
+  });
+});
+
+describe("busy guard", () => {
+  it("treats a busy start_install response as an attach rather than an error", async () => {
+    vi.useFakeTimers();
+    mockRoute("settings_read", () => ({ sd_card_path: "/games" }));
+    mockRoute("list_usb_mounts", () => ["/usb"]);
+    mockRoute("list_zip_files", () => ["/usb/Game.zip"]);
+    mockRoute("check_extract_conflict", () => ({
+      conflict: false,
+      folder_name: "Game",
+      suffix_folder_name: null,
+    }));
+    let attached = false;
+    const polls = [
+      progressResult("extract", null, { job_id: 7, percent: 60, bytes_done: 60, done: false }),
+      progressResult("extract", { game_dir: "/games/Game" }, { job_id: 7 }),
+    ];
+    mockRoute("start_install", () => {
+      attached = true;
+      return { started: false, busy: true, job_id: 7, operation: "extract" };
+    });
+    mockRoute("get_progress", () => {
+      if (!attached) return coldProgress();
+      const next = polls.shift();
+      if (!next) throw new Error("No busy progress result queued");
+      return next;
+    });
+    mockRoute("get_launchers", () => ({ launchers: ["/games/Game/run.sh"], type: "sh" }));
+    mockRoute("ensure_executable", () => ({ path: "/games/Game/run.sh" }));
+    mockRoute("can_link_saves", () => ({ available: false, reason: "" }));
+
+    renderPlugin();
+    await flushEffects();
+    await beginInstall();
+
+    expect(screen.getByTestId("progress")).toHaveTextContent("Extracting… 60%");
+    expect(screen.queryByText(/Install flow failed/)).not.toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await flushEffects();
+
+    expect(screen.getByText(/"Game" added to Steam/)).toBeInTheDocument();
+    expect(callsFor("start_install")).toHaveLength(1);
   });
 });
 

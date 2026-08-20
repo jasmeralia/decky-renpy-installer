@@ -513,60 +513,75 @@ def test_copy_sync_copies_bytes_and_updates_progress(tmp_path: Path):
     assert main._progress["bytes_done"] == main._progress["bytes_total"] == source.stat().st_size
 
 
-def test_copy_sync_and_do_copy_report_missing_source(monkeypatch, tmp_path: Path):
+def test_copy_sync_reports_missing_source(tmp_path: Path):
     main = load_main()
     missing = tmp_path / "missing.zip"
-
-    async def synchronous_to_thread(function, *args):
-        return function(*args)
-
-    monkeypatch.setattr(main.asyncio, "to_thread", synchronous_to_thread)
 
     with pytest.raises(RuntimeError, match="ZIP not found"):
         main._copy_sync(str(missing), str(tmp_path / "dest"))
 
-    main._progress = {"done": False, "error": None}
-    asyncio.run(main._do_copy(str(missing), str(tmp_path / "dest")))
-    assert main._progress["done"] is True
-    assert "ZIP not found" in main._progress["error"]
 
-
-def test_do_copy_success_sets_result(monkeypatch, tmp_path: Path):
+def test_do_install_runs_copy_then_extract_and_reports_game_dir(monkeypatch, tmp_path: Path):
     main = load_main()
-    source = tmp_path / "Game.zip"
-    source.write_bytes(b"contents")
-    destination = tmp_path / "dest"
-    main._progress = {"done": False, "error": None}
+    observed_operations = []
+
+    def copy_sync(usb_zip_path, dest_root):
+        observed_operations.append(main._progress["operation"])
+        assert usb_zip_path == "/usb/Game.zip"
+        assert dest_root == str(tmp_path)
+        return str(tmp_path / "Game.zip")
+
+    def extract_sync(zip_path, dest_root, overwrite, replace, suffix):
+        observed_operations.append(main._progress["operation"])
+        assert (zip_path, dest_root, overwrite, replace, suffix) == (
+            str(tmp_path / "Game.zip"), str(tmp_path), True, False, True,
+        )
+        return str(tmp_path / "Game_2")
 
     async def synchronous_to_thread(function, *args):
         return function(*args)
 
     monkeypatch.setattr(main.asyncio, "to_thread", synchronous_to_thread)
+    monkeypatch.setattr(main, "_copy_sync", copy_sync)
+    monkeypatch.setattr(main, "_extract_sync", extract_sync)
+    main._progress = {"operation": "copy", "done": False, "error": None}
 
-    asyncio.run(main._do_copy(str(source), str(destination)))
+    asyncio.run(main._do_install("/usb/Game.zip", str(tmp_path), True, False, True))
 
+    assert observed_operations == ["copy", "extract"]
     assert main._progress["done"] is True
     assert main._progress["percent"] == 100
-    assert main._progress["result"] == {"dest_zip": str(destination / source.name)}
+    assert main._progress["result"] == {"game_dir": str(tmp_path / "Game_2")}
 
 
-def test_do_extract_reports_timeout(monkeypatch, tmp_path: Path):
+def test_do_install_stops_after_copy_failure_and_does_not_extract(monkeypatch, tmp_path: Path):
     main = load_main()
+    extract_called = False
 
-    async def timeout_wait_for(_awaitable, timeout):
-        _awaitable.close()
-        assert timeout == 0.01
-        raise asyncio.TimeoutError
+    def fail_copy(*_args):
+        raise RuntimeError("copy failed")
 
-    monkeypatch.setattr(main, "_EXTRACT_TIMEOUT_SECONDS", 0.01)
-    monkeypatch.setattr(main.asyncio, "wait_for", timeout_wait_for)
-    main._progress = {"done": False, "error": None}
-    asyncio.run(main._do_extract("game.zip", str(tmp_path)))
+    def fail_if_extract_called(*_args):
+        nonlocal extract_called
+        extract_called = True
+        raise AssertionError("should not be called")
+
+    async def synchronous_to_thread(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(main.asyncio, "to_thread", synchronous_to_thread)
+    monkeypatch.setattr(main, "_copy_sync", fail_copy)
+    monkeypatch.setattr(main, "_extract_sync", fail_if_extract_called)
+    main._progress = {"operation": "copy", "done": False, "error": None}
+
+    asyncio.run(main._do_install("game.zip", str(tmp_path), False, False, False))
+
     assert main._progress["done"] is True
-    assert main._progress["error"] == "Extraction timed out after 0.01 seconds"
+    assert main._progress["error"] == "copy failed"
+    assert extract_called is False
 
 
-def test_do_extract_reports_generic_error(monkeypatch, tmp_path: Path):
+def test_do_install_reports_extract_failure(monkeypatch, tmp_path: Path):
     main = load_main()
 
     def fail_extract(*_args):
@@ -576,11 +591,39 @@ def test_do_extract_reports_generic_error(monkeypatch, tmp_path: Path):
         return function(*args)
 
     monkeypatch.setattr(main.asyncio, "to_thread", synchronous_to_thread)
+    monkeypatch.setattr(main, "_copy_sync", lambda *_args: str(tmp_path / "game.zip"))
     monkeypatch.setattr(main, "_extract_sync", fail_extract)
-    main._progress = {"done": False, "error": None}
-    asyncio.run(main._do_extract("game.zip", str(tmp_path)))
+    main._progress = {"operation": "copy", "done": False, "error": None}
+
+    asyncio.run(main._do_install("game.zip", str(tmp_path), False, False, False))
+
+    assert main._progress["operation"] == "extract"
     assert main._progress["done"] is True
     assert main._progress["error"] == "broken archive"
+
+
+def test_do_install_reports_extract_timeout(monkeypatch, tmp_path: Path):
+    main = load_main()
+
+    async def synchronous_to_thread(function, *args):
+        return function(*args)
+
+    async def timeout_wait_for(_awaitable, timeout):
+        _awaitable.close()
+        assert timeout == 0.01
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(main, "_EXTRACT_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(main, "_copy_sync", lambda *_args: str(tmp_path / "game.zip"))
+    monkeypatch.setattr(main.asyncio, "to_thread", synchronous_to_thread)
+    monkeypatch.setattr(main.asyncio, "wait_for", timeout_wait_for)
+    main._progress = {"operation": "copy", "done": False, "error": None}
+
+    asyncio.run(main._do_install("game.zip", str(tmp_path), False, False, False))
+
+    assert main._progress["operation"] == "extract"
+    assert main._progress["done"] is True
+    assert main._progress["error"] == "Extraction timed out after 0.01 seconds"
 
 
 def test_save_folder_helpers_validate_and_sort(tmp_path: Path):
@@ -690,30 +733,36 @@ def test_plugin_discovery_and_progress_wrappers(monkeypatch, tmp_path: Path):
     assert main._progress["percent"] == 42
 
 
-def test_plugin_start_copy_cancels_inflight_task(tmp_path: Path):
+def test_start_install_rejects_second_call_while_job_active(tmp_path: Path):
     main = load_main()
 
     async def scenario():
-        started = []
+        release = asyncio.Event()
 
-        async def blocking_copy(zip_path, _dest_root):
-            started.append(zip_path)
-            await asyncio.sleep(3600)
+        async def blocking_install(*_args):
+            await release.wait()
 
-        main._do_copy = blocking_copy
+        main._do_install = blocking_install
         plugin = main.Plugin()
-        first_result = await plugin.start_copy("first.zip", str(tmp_path))
+        first_result = await plugin.start_install("first.zip", str(tmp_path), True, False, False)
         first_task = main._active_task
         await asyncio.sleep(0)
-        second_result = await plugin.start_copy("second.zip", str(tmp_path))
-        second_task = main._active_task
-        await asyncio.sleep(0)
-        assert first_result == second_result == {"started": True}
-        assert first_task.cancelled()
+        first_job_id = main._progress["job_id"]
+        second_result = await plugin.start_install("second.zip", str(tmp_path), False, True, True)
+
+        assert first_result == {"started": True, "busy": False, "job_id": first_job_id}
+        assert second_result == {
+            "started": False,
+            "busy": True,
+            "job_id": first_job_id,
+            "operation": "copy",
+        }
+        assert main._active_task is first_task
+        assert main._progress["job_id"] == first_job_id
+        assert main._progress["request"]["usb_zip_path"] == "first.zip"
         assert main._progress["operation"] == "copy"
-        assert started == ["first.zip", "second.zip"]
-        second_task.cancel()
-        await asyncio.sleep(0)
+        release.set()
+        await first_task
 
     asyncio.run(scenario())
 
@@ -741,33 +790,72 @@ def test_plugin_conflict_checks_top_folder_and_flat_zip(tmp_path: Path):
     }
 
 
-def test_plugin_start_extract_cancels_inflight_task(tmp_path: Path):
+def test_start_install_allows_new_job_after_previous_completes(tmp_path: Path):
     main = load_main()
 
     async def scenario():
-        calls = []
+        async def complete_install(*_args):
+            return None
 
-        async def blocking_extract(zip_path, dest_root, overwrite, replace, suffix):
-            calls.append((zip_path, dest_root, overwrite, replace, suffix))
-            await asyncio.sleep(3600)
-
-        main._do_extract = blocking_extract
+        main._do_install = complete_install
         plugin = main.Plugin()
-        await plugin.start_extract("first.zip", str(tmp_path), True, False)
-        first_task = main._active_task
+        first = await plugin.start_install("first.zip", str(tmp_path))
+        await main._active_task
+        second = await plugin.start_install("second.zip", str(tmp_path))
+        await main._active_task
+
+        assert first == {"started": True, "busy": False, "job_id": 1}
+        assert second == {"started": True, "busy": False, "job_id": 2}
+
+    asyncio.run(scenario())
+
+
+def test_get_progress_includes_request_context(tmp_path: Path):
+    main = load_main()
+
+    async def scenario():
+        release = asyncio.Event()
+
+        async def blocking_install(*_args):
+            await release.wait()
+
+        main._do_install = blocking_install
+        plugin = main.Plugin()
+        await plugin.start_install("/usb/Game.zip", str(tmp_path), True, False, True)
         await asyncio.sleep(0)
-        result = await plugin.start_extract("second.zip", str(tmp_path), False, False, True)
-        second_task = main._active_task
-        await asyncio.sleep(0)
-        assert result == {"started": True}
-        assert first_task.cancelled()
-        assert main._progress["operation"] == "extract"
-        assert calls == [
-            ("first.zip", str(tmp_path), True, False, False),
-            ("second.zip", str(tmp_path), False, False, True),
-        ]
-        second_task.cancel()
-        await asyncio.sleep(0)
+        progress = await plugin.get_progress()
+
+        assert progress["request"] == {
+            "usb_zip_path": "/usb/Game.zip",
+            "dest_root": str(tmp_path),
+            "overwrite": True,
+            "replace": False,
+            "suffix": True,
+        }
+        release.set()
+        await main._active_task
+
+    asyncio.run(scenario())
+
+
+def test_job_id_starts_at_zero_and_increments_monotonically(tmp_path: Path):
+    main = load_main()
+
+    async def scenario():
+        async def complete_install(*_args):
+            return None
+
+        main._do_install = complete_install
+        plugin = main.Plugin()
+        assert main._progress["job_id"] == 0
+        job_ids = []
+        for index in range(3):
+            result = await plugin.start_install(f"game-{index}.zip", str(tmp_path))
+            job_ids.append(result["job_id"])
+            await main._active_task
+
+        assert job_ids == [1, 2, 3]
+        assert main._progress["job_id"] == 3
 
     asyncio.run(scenario())
 
