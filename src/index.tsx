@@ -279,8 +279,10 @@ export default definePlugin(() => {
     const [usbMounts, setUsbMounts] = useState<string[]>([]);
     const [usbPath, setUsbPath] = useState("");
     const [zipFiles, setZipFiles] = useState<string[]>([]);
+    const [page, setPage] = useState<"browse" | "settings">("browse");
     const [settingsBusy, setSettingsBusy] = useState(false);
     const [zipPage, setZipPage] = useState(0);
+    const [browseStatus, setBrowseStatus] = useState("");
     const [settingsStatus, setSettingsStatus] = useState("");
     const [mountStatus, setMountStatus] = useState("");
     const [logLevel, setLogLevel] = useState<LogLevel>("error");
@@ -428,17 +430,17 @@ export default definePlugin(() => {
             setUsbPath(mounts[0]);
             // Use local variable — usbPath state is still "" at this point
             setSettingsBusy(true);
-            setSettingsStatus("Scanning USB for ZIP files…");
+            setBrowseStatus("Scanning USB for ZIP files…");
             try {
               const files = await listZipFiles(mounts[0]);
               log("info", "Auto-scan found ZIP files:", files);
               setZipFiles(files);
               setZipPage(0);
-              setSettingsStatus(`Found ${files.length} ZIP file(s).`);
+              setBrowseStatus(`Found ${files.length} ZIP file(s).`);
             } catch (e) {
               log("warn", "Auto-scan listZipFiles failed:", e);
               setZipFiles([]);
-              setSettingsStatus(`No ZIP files found: ${String(e)}`);
+              setBrowseStatus(`No ZIP files found: ${String(e)}`);
             } finally {
               setSettingsBusy(false);
             }
@@ -455,22 +457,22 @@ export default definePlugin(() => {
     const refreshZipFiles = async () => {
       if (!usbPath.trim()) {
         log("warn", "refreshZipFiles called with empty usbPath");
-        setSettingsStatus("No USB mount path set.");
+        setBrowseStatus("No USB mount path set.");
         return;
       }
       log("info", "Scanning USB for ZIP files:", usbPath);
       setSettingsBusy(true);
-      setSettingsStatus("Scanning USB for ZIP files…");
+      setBrowseStatus("Scanning USB for ZIP files…");
       try {
         const files = await listZipFiles(usbPath);
         log("info", "Found ZIP files:", files);
         setZipFiles(files);
         setZipPage(0);
-        setSettingsStatus(`Found ${files.length} ZIP file(s).`);
+        setBrowseStatus(`Found ${files.length} ZIP file(s).`);
       } catch (e) {
         log("error", "listZipFiles failed:", e);
         setZipFiles([]);
-        setSettingsStatus(`Error: ${String(e)}`);
+        setBrowseStatus(`Error: ${String(e)}`);
       } finally {
         setSettingsBusy(false);
       }
@@ -479,7 +481,7 @@ export default definePlugin(() => {
     const refreshUsbMounts = async () => {
       log("info", "Refreshing USB mounts");
       setSettingsBusy(true);
-      setSettingsStatus("Refreshing USB mounts...");
+      setBrowseStatus("Refreshing USB mounts...");
       try {
         const newlyMounted = await mountUsbDevices();
         const mounts = await listUsbMounts();
@@ -492,10 +494,10 @@ export default definePlugin(() => {
             ? `Auto-mounted: ${newlyMounted.join(", ")}`
             : "No unmounted USB partitions found.",
         );
-        setSettingsStatus(`Found ${mounts.length} USB mount(s).`);
+        setBrowseStatus(`Found ${mounts.length} USB mount(s).`);
       } catch (e) {
         log("error", "refreshUsbMounts failed:", e);
-        setSettingsStatus(`Mount error: ${String(e)}`);
+        setBrowseStatus(`Mount error: ${String(e)}`);
       } finally {
         setSettingsBusy(false);
       }
@@ -809,6 +811,7 @@ export default definePlugin(() => {
 
     const handleInstallAnother = () => {
       log("info", "User clicked 'Install another game', resetting to browse");
+      setPage("browse");
       setStep("browse");
       setProgress(0);
       setUsbSafeMsg(false);
@@ -1003,12 +1006,101 @@ export default definePlugin(() => {
       );
     }
 
-    // Browse step
     const logLevelOptions: SingleDropdownOption[] = LOG_LEVELS.map((l) => ({
       data: l,
       label: l.toUpperCase(),
     }));
 
+    if (page === "settings") {
+      return (
+        <PanelSection title="Settings">
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => setPage("browse")}>
+              Back to installer
+            </ButtonItem>
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <TextField
+              label="SD card destination"
+              description="Games folder on SD card."
+              value={destRoot}
+              onChange={(e) => setDestRoot(e.target.value)}
+              disabled={settingsBusy}
+            />
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={handleBrowseSd}
+              disabled={settingsBusy}
+            >
+              Browse for SD card folder…
+            </ButtonItem>
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={handleSaveSdPath}
+              disabled={settingsBusy || !destRoot.trim()}
+            >
+              Save SD card path
+            </ButtonItem>
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <TextField
+              label="Save root folder"
+              description="Optional folder containing per-game save folders."
+              value={saveRoot}
+              onChange={(e) => setSaveRoot(e.target.value)}
+              disabled={settingsBusy}
+            />
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={handleBrowseSaveRoot}
+              disabled={settingsBusy}
+            >
+              Browse for save root folder...
+            </ButtonItem>
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={handleSaveSaveRoot}
+              disabled={settingsBusy}
+            >
+              Save save root path
+            </ButtonItem>
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <DropdownItem
+              label="Log level"
+              description="Backend and frontend logging verbosity."
+              rgOptions={logLevelOptions}
+              selectedOption={logLevel}
+              onChange={handleLogLevelChange}
+              disabled={settingsBusy}
+            />
+          </PanelSectionRow>
+
+          {settingsStatus ? (
+            <PanelSectionRow>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>{settingsStatus}</div>
+            </PanelSectionRow>
+          ) : null}
+        </PanelSection>
+      );
+    }
+
+    // Browse step
     return (
       <PanelSection title="Renpy ZIP Installer">
         {mountStatus ? (
@@ -1049,36 +1141,6 @@ export default definePlugin(() => {
             disabled={settingsBusy}
           >
             Refresh USB mounts
-          </ButtonItem>
-        </PanelSectionRow>
-
-        <PanelSectionRow>
-          <TextField
-            label="Save root folder"
-            description="Optional folder containing per-game save folders."
-            value={saveRoot}
-            onChange={(e) => setSaveRoot(e.target.value)}
-            disabled={settingsBusy}
-          />
-        </PanelSectionRow>
-
-        <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            onClick={handleBrowseSaveRoot}
-            disabled={settingsBusy}
-          >
-            Browse for save root folder...
-          </ButtonItem>
-        </PanelSectionRow>
-
-        <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            onClick={handleSaveSaveRoot}
-            disabled={settingsBusy}
-          >
-            Save save root path
           </ButtonItem>
         </PanelSectionRow>
 
@@ -1148,49 +1210,20 @@ export default definePlugin(() => {
         })()}
 
         <PanelSectionRow>
-          <TextField
-            label="SD card destination"
-            description="Games folder on SD card."
-            value={destRoot}
-            onChange={(e) => setDestRoot(e.target.value)}
-            disabled={settingsBusy}
-          />
+          <div style={{ fontSize: 12, opacity: 0.8 }}>
+            Install to: {destRoot.trim() || "(not set — open Settings)"}
+          </div>
         </PanelSectionRow>
 
         <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            onClick={handleBrowseSd}
-            disabled={settingsBusy}
-          >
-            Browse for SD card folder…
+          <ButtonItem layout="below" onClick={() => setPage("settings")}>
+            Settings
           </ButtonItem>
         </PanelSectionRow>
 
-        <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            onClick={handleSaveSdPath}
-            disabled={settingsBusy || !destRoot.trim()}
-          >
-            Save SD card path
-          </ButtonItem>
-        </PanelSectionRow>
-
-        <PanelSectionRow>
-          <DropdownItem
-            label="Log level"
-            description="Backend and frontend logging verbosity."
-            rgOptions={logLevelOptions}
-            selectedOption={logLevel}
-            onChange={handleLogLevelChange}
-            disabled={settingsBusy}
-          />
-        </PanelSectionRow>
-
-        {settingsStatus ? (
+        {browseStatus ? (
           <PanelSectionRow>
-            <div style={{ fontSize: 12, opacity: 0.8 }}>{settingsStatus}</div>
+            <div style={{ fontSize: 12, opacity: 0.8 }}>{browseStatus}</div>
           </PanelSectionRow>
         ) : null}
       </PanelSection>
