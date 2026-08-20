@@ -10,6 +10,8 @@ number at merge time, in-flight changes go under `## [Unreleased]`.
 ### Added
 - CI now publishes frontend and backend coverage to Codecov as informational
   reports while the combined baseline remains below 80%.
+- Meaningful frontend installer-state and backend behavior tests now raise
+  combined coverage above 80%, with required 80% Codecov project and patch checks.
 
 ### Security
 - Override transitive `nanoid` releases below 3.3.18 to the patched release.

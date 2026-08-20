@@ -20,7 +20,7 @@ import { basename, formatEta, formatSpeed } from "./pathUtils";
 
 type ErrorBoundaryState = { hasError: boolean; error: string };
 
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
     this.state = { hasError: false, error: "" };

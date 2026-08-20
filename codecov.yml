@@ -3,11 +3,13 @@ coverage:
     project:
       default:
         target: 80%
-        informational: true
+        informational: false
     patch:
       default:
         target: 80%
-        informational: true
+        informational: false
 ignore:
   - "src/**/*.test.ts"
+  - "src/**/*.test.tsx"
+  - "src/setupTests.ts"
   - "tests/**"
