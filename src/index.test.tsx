@@ -202,6 +202,11 @@ async function renderSettled(): Promise<void> {
   await waitFor(() => expect(screen.getByText(/unmounted USB partitions|Auto-mounted:/)).toBeInTheDocument());
 }
 
+async function openSettings(): Promise<void> {
+  await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Back to installer" })).toBeInTheDocument());
+}
+
 function progressResult(
   operation: "copy" | "extract",
   result: Record<string, string> | null,
@@ -309,6 +314,8 @@ describe("plugin definition and initial loading", () => {
     mockRoute("settings_read", () => ({ sd_card_path: "/saved/games", log_level: "debug" }));
 
     await renderSettled();
+    expect(screen.getByText("Install to: /saved/games")).toBeInTheDocument();
+    await openSettings();
 
     expect(screen.getByLabelText("SD card destination")).toHaveValue("/saved/games");
     expect(screen.getByLabelText("Log level")).toHaveValue("debug");
@@ -320,6 +327,8 @@ describe("plugin definition and initial loading", () => {
 
     await renderSettled();
 
+    expect(screen.getByText("Install to: /default/games")).toBeInTheDocument();
+    await openSettings();
     expect(screen.getByLabelText("SD card destination")).toHaveValue("/default/games");
   });
 
@@ -328,7 +337,7 @@ describe("plugin definition and initial loading", () => {
 
     await renderSettled();
 
-    expect(screen.getByLabelText("SD card destination")).toHaveValue("/run/media/deck/SD");
+    expect(screen.getByText("Install to: /run/media/deck/SD")).toBeInTheDocument();
     expect(callsFor("settings_set")).toContainEqual([
       "settings_set",
       "sd_card_path",
@@ -340,9 +349,7 @@ describe("plugin definition and initial loading", () => {
   it("keeps the hardcoded destination when SD detection returns null", async () => {
     await renderSettled();
 
-    expect(screen.getByLabelText("SD card destination")).toHaveValue(
-      "/run/media/mmcblk0p1/Games",
-    );
+    expect(screen.getByText("Install to: /run/media/mmcblk0p1/Games")).toBeInTheDocument();
     expect(callsFor("settings_set")).toHaveLength(0);
   });
 
@@ -403,8 +410,85 @@ describe("plugin definition and initial loading", () => {
 
     await renderSettled();
 
-    expect(screen.getByLabelText("SD card destination")).toHaveValue("/sd");
+    expect(screen.getByText("Install to: /sd")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Game.zip" })).toBeInTheDocument();
+  });
+});
+
+describe("settings screen", () => {
+  it("does not show moved configuration fields on the browse screen", async () => {
+    await renderSettled();
+
+    expect(screen.queryByLabelText("SD card destination")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Save root folder")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Log level")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+  });
+
+  it("returns to the browse screen from settings", async () => {
+    await renderSettled();
+    await openSettings();
+
+    await userEvent.click(screen.getByRole("button", { name: "Back to installer" }));
+
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByText(/USB mounts:/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back to installer" })).not.toBeInTheDocument();
+  });
+
+  it("shows a prompt when no SD destination is configured", async () => {
+    await renderSettled();
+    await openSettings();
+    await userEvent.clear(screen.getByLabelText("SD card destination"));
+
+    await userEvent.click(screen.getByRole("button", { name: "Back to installer" }));
+
+    expect(screen.getByText("Install to: (not set — open Settings)")).toBeInTheDocument();
+  });
+
+  it("keeps USB status messages on the browse screen", async () => {
+    await renderSettled();
+    mockRoute("mount_usb_devices", () => []);
+    mockRoute("list_usb_mounts", () => ["/usb/a", "/usb/b"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh USB mounts" }));
+    expect(await screen.findByText("Found 2 USB mount(s).")).toBeInTheDocument();
+
+    await openSettings();
+    expect(screen.queryByText("Found 2 USB mount(s).")).not.toBeInTheDocument();
+  });
+
+  it("keeps save confirmations on the settings screen", async () => {
+    await renderSettled();
+    await openSettings();
+    await userEvent.clear(screen.getByLabelText("SD card destination"));
+    await userEvent.type(screen.getByLabelText("SD card destination"), "/new/games");
+    await userEvent.click(screen.getByRole("button", { name: "Save SD card path" }));
+    expect(await screen.findByText("SD card path saved.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Back to installer" }));
+    expect(screen.queryByText("SD card path saved.")).not.toBeInTheDocument();
+    expect(screen.getByText("Install to: /new/games")).toBeInTheDocument();
+  });
+
+  it("returns to the browse screen after Install another game", async () => {
+    vi.useFakeTimers();
+    mockRoute("settings_read", () => ({ sd_card_path: "/games" }));
+    mockRoute("list_usb_mounts", () => ["/usb"]);
+    mockRoute("list_zip_files", () => ["/usb/Game.zip"]);
+    configureInstall();
+    mockRoute("can_link_saves", () => ({ available: false, reason: "" }));
+
+    renderPlugin();
+    await flushEffects();
+    await beginInstall();
+    await completeProgress();
+
+    fireEvent.click(screen.getByRole("button", { name: "Install another game" }));
+
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back to installer" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("SD card destination")).not.toBeInTheDocument();
   });
 });
 
@@ -451,6 +535,7 @@ describe("browse screen controls", () => {
 
   it("validates, saves, and reports failures for the SD path", async () => {
     await renderSettled();
+    await openSettings();
     const destination = screen.getByLabelText("SD card destination");
     await userEvent.clear(destination);
     callMock.mockClear();
@@ -474,6 +559,7 @@ describe("browse screen controls", () => {
 
   it("saves a trimmed save root and can clear it", async () => {
     await renderSettled();
+    await openSettings();
     const input = screen.getByLabelText("Save root folder");
     await userEvent.type(input, "  /cloud/saves  ");
     await userEvent.click(screen.getByRole("button", { name: "Save save root path" }));
@@ -492,6 +578,7 @@ describe("browse screen controls", () => {
 
   it("persists and applies a changed log level", async () => {
     await renderSettled();
+    await openSettings();
 
     await userEvent.selectOptions(screen.getByLabelText("Log level"), "warn");
 
@@ -529,18 +616,22 @@ describe("browse screen controls", () => {
     await renderSettled();
     openFilePickerMock
       .mockResolvedValueOnce({ realpath: "/picked/usb" })
-      .mockResolvedValueOnce({ realpath: "/picked/sd" })
-      .mockResolvedValueOnce({ realpath: "/picked/saves" })
       .mockRejectedValueOnce(new Error("cancelled"));
 
     await userEvent.click(screen.getByRole("button", { name: "Browse for USB folder…" }));
     expect(screen.getByLabelText("USB mount path")).toHaveValue("/picked/usb");
+    await userEvent.click(screen.getByRole("button", { name: "Browse for USB folder…" }));
+    expect(screen.getByLabelText("USB mount path")).toHaveValue("/picked/usb");
+
+    await openSettings();
+    openFilePickerMock
+      .mockResolvedValueOnce({ realpath: "/picked/sd" })
+      .mockResolvedValueOnce({ realpath: "/picked/saves" });
+
     await userEvent.click(screen.getByRole("button", { name: "Browse for SD card folder…" }));
     expect(screen.getByLabelText("SD card destination")).toHaveValue("/picked/sd");
     await userEvent.click(screen.getByRole("button", { name: "Browse for save root folder..." }));
     expect(screen.getByLabelText("Save root folder")).toHaveValue("/picked/saves");
-    await userEvent.click(screen.getByRole("button", { name: "Browse for USB folder…" }));
-    expect(screen.getByLabelText("USB mount path")).toHaveValue("/picked/usb");
   });
 });
 
