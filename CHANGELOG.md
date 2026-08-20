@@ -19,6 +19,9 @@ number at merge time, in-flight changes go under `## [Unreleased]`.
 - Override transitive `nanoid` releases below 3.3.18 to the patched release.
 
 ### Changed
+- Copy and extraction now run as one guarded backend install job. The frontend
+  resumes active jobs after remount and shows a dismissible result banner when a
+  job finished while the panel was unmounted, without automatically adding it to Steam.
 - SD card destination, save root, and log level now live in a dedicated Settings
   screen so the main installer view focuses on USB and ZIP selection.
 - Added frontend tests covering Settings screen navigation and browse/settings

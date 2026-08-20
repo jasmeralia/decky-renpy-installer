@@ -12,6 +12,11 @@ Action flow (in order):
    On completion, show a message: "USB drive can be safely removed unless you have more
    games to install." No buttons yet; installation continues automatically.
 
+   Copy and extraction run as one backend job. If the frontend remounts while that job is
+   active, it reattaches and resumes showing progress. If the job completed while the
+   frontend was unmounted, the browse screen shows a dismissible result banner and does
+   not automatically continue into launcher selection or Steam shortcut creation.
+
 3. **Inspect ZIP structure** — Examine the ZIP on the SD card to determine if all contents
    live under a single top-level subfolder.
 
@@ -83,10 +88,9 @@ Current backend methods:
 - list_usb_mounts()
 - detect_sd_mount()
 - list_zip_files(mount_path)
-- start_copy(zip_path, dest_root) — starts async chunked copy; returns immediately
+- start_install(usb_zip_path, dest_root, overwrite=False, replace=False, suffix=False) — starts one async copy-then-extract job; if a job is already active, returns `{started: False, busy: True, job_id, operation}` without replacing it
 - check_extract_conflict(zip_path, dest_root) — reports the target folder conflict and next available suffixed name
-- start_extract(zip_path, dest_root, overwrite=False, replace=False, suffix=False) — starts async extraction with Case A/B and conflict-resolution logic; deletes ZIP on success; returns immediately
-- get_progress() — polls current op: {operation, percent, done, error, result}
+- get_progress() — polls the current job, including its monotonic `job_id`, original `request`, and existing progress fields: `{job_id, operation, percent, bytes_done, bytes_total, current_file, updated_at, done, error, result, request}`
 - get_launchers(game_dir) — returns {launchers: [...paths], type: "sh"|"exe"|null}
 - ensure_executable(launcher_path) — chmod +x
 - list_save_folders(save_root) — returns immediate subfolders under the configured save root
