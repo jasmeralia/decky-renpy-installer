@@ -17,6 +17,7 @@ number at merge time, in-flight changes go under `## [Unreleased]`.
 
 ### Security
 - Override transitive `nanoid` releases below 3.3.18 to the patched release.
+- Override transitive `brace-expansion` releases below 5.0.12 to the patched release.
 
 ### Changed
 - Copy and extraction now run as one guarded backend install job. The frontend
