@@ -16,6 +16,7 @@ number at merge time, in-flight changes go under `## [Unreleased]`.
   combined coverage above 80%, with required 80% Codecov project and patch checks.
 
 ### Security
+- Override transitive `source-map-js` releases below 1.2.2 to the patched release.
 - Override transitive `nanoid` releases below 3.3.18 to the patched release.
 - Override transitive `brace-expansion` releases below 5.0.12 to the patched release.
 
