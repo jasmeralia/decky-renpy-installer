@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@decky/api": "^1.1.3",
-    "@decky/ui": "^4.16.0",
+    "@decky/ui": "^4.16.4",
     "decky-frontend-lib": "^3.25.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
@@ -34,11 +34,11 @@
     "globals": "^17.13.0",
     "jsdom": "^30.1.3",
     "react-icons": "^5.7.0",
-    "rollup": "^4.65.0",
+    "rollup": "^4.66.0",
     "rollup-plugin-esbuild": "^6.1.1",
     "rollup-plugin-external-globals": "^0.13.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.0",
+    "typescript-eslint": "^8.72.1",
     "vitest": "^5.0.5"
   }
 }
