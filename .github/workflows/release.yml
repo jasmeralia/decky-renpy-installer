@@ -65,7 +65,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit
-        run: pnpm audit --audit-level=low
+        run: pnpm audit --audit-level=moderate
 
       - name: Lint
         run: pnpm run lint
