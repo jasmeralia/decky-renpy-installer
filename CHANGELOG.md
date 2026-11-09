@@ -24,6 +24,8 @@ number at merge time, in-flight changes go under `## [Unreleased]`.
 - Override transitive `brace-expansion` releases below 5.0.12 to the patched release.
 
 ### Changed
+- Keep `jsdom`'s `parse5` and `parse5-parser-stream` versions aligned so the
+  upgraded test environment can initialize correctly.
 - Copy and extraction now run as one guarded backend install job. The frontend
   resumes active jobs after remount and shows a dismissible result banner when a
   job finished while the panel was unmounted, without automatically adding it to Steam.
