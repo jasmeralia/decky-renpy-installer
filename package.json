@@ -26,7 +26,7 @@
     "@rollup/plugin-replace": "^6.0.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.8",
+    "@testing-library/user-event": "^14.6.10",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitest/coverage-v8": "^5.1.0",
@@ -34,11 +34,11 @@
     "globals": "^17.14.0",
     "jsdom": "^31.0.0",
     "react-icons": "^5.7.0",
-    "rollup": "^4.67.5",
+    "rollup": "^4.68.2",
     "rollup-plugin-esbuild": "^6.1.1",
     "rollup-plugin-external-globals": "^0.13.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.1",
+    "typescript-eslint": "^8.72.2",
     "vitest": "^5.1.0"
   }
 }
